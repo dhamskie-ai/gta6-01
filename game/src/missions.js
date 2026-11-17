@@ -1,412 +1,247 @@
-// 5 story missions + side activities (taxi, stunt jumps, sun coins, garage)
-// + dialog, save/load, game over. Missions are data-driven step lists.
+// Story missions (5) + side activities: taxi fares, stunt jumps, sun coins.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { spawnCar, addWanted } from './vehicles.js';
-import { spawnGuard } from './combat.js';
-import { clearWanted } from './police.js';
-import { makePedModel } from './traffic.js';
+import { MISSIONS, CONFIG, TAXI_SPOTS, JUMP_RAMPS, SHOP_POS } from './config.js';
+import { spawnGuard, spawnPickup } from './combat.js';
+import { spawnCar } from './vehicles.js';
+import { removePed } from './traffic.js';
 
-export const MISSION_DEFS = [
-  {
-    name: 'First Gear', reward: 150,
-    briefing: 'Sal Vega: "Ro, utangmu belum lunas. Curi mobil itu, antar ke bengkel Mara."',
-    steps: [
-      { type: 'goto', x: 0, z: 60, r: 6, text: 'Jalan kaki ke mobil parkir di utara' },
-      { type: 'enterCar', text: 'Tekan E untuk mencuri mobil' },
-      { type: 'driveTo', x: -60, z: -60, r: 8, text: 'Kendarai ke bengkel Mara (hijau)' },
-    ],
-  },
-  {
-    name: 'Courier Run', reward: 300,
-    briefing: 'Kip: "Tiga paket, empat menit. Jangan tabrak apa pun — paketnya rapuh."',
-    steps: [
-      { type: 'driveTo', x: 120, z: -120, r: 8, text: 'Antar paket 1/3 ke The Spires', time: 240 },
-      { type: 'driveTo', x: -180, z: 180, r: 8, text: 'Antar paket 2/3 ke Calle Verde' },
-      { type: 'driveTo', x: 180, z: 180, r: 8, text: 'Antar paket 3/3 ke The Docks' },
-    ],
-  },
-  {
-    name: 'The Docks Job', reward: 500,
-    briefing: 'Sal Vega: "Curi truk Hauler di dermaga. Penjaga Dario ada di sana — hati-hati."',
-    steps: [
-      { type: 'goto', x: 210, z: 200, r: 10, text: 'Masuk ke area dermaga' },
-      { type: 'shoot', count: 4, text: 'Lumpuhkan 4 penjaga Dario' },
-      { type: 'enterCar', carType: 'truck', text: 'Curi truk Hauler (E)' },
-      { type: 'driveTo', x: -60, z: -60, r: 8, text: 'Kabur ke bengkel Mara — wanted 2 bintang!' },
-    ],
-  },
-  {
-    name: 'Neon Nights', reward: 600,
-    briefing: 'Kip: "Kurir Dario lewat Marina malam ini. Buntuti dia — jangan sampai ketahuan."',
-    steps: [
-      { type: 'goto', x: -240, z: 40, r: 10, text: 'Pergi ke dermaga Marina malam hari' },
-      { type: 'follow', x: -180, z: -60, r: 6, text: 'Buntuti kurir Dario (jaga jarak 10–25 m)' },
-      { type: 'chase', x: 120, z: 120, r: 10, text: 'Dia kabur! Kejar sampai ke Docks' },
-    ],
-  },
-  {
-    name: 'Bay Heist', reward: 1000,
-    briefing: 'Sal Vega: "Terakhir. Veloce GT Aurelia di garasi penthouse. Ambil — utangmu lunas."',
-    steps: [
-      { type: 'goto', x: 120, z: -60, r: 8, text: 'Masuk ke garasi The Spires' },
-      { type: 'enterCar', carType: 'sport', text: 'Curi Veloce GT Aurelia (E)' },
-      { type: 'driveTo', x: -300, z: 40, r: 10, text: 'Antar ke dermaga Marina — wanted 4 bintang!' },
-    ],
-  },
-];
-
-export function createMissions(G) {
-  G.missions = {
-    index: 0,
-    step: 0,
-    stepTimer: 0,
-    guardsDown: 0,
-    marker: null,
-    markerPos: new THREE.Vector3(0, 0, 60),
-    active: false,
-    done: false,
-    dialog: '',
-    dialogTimer: 0,
-    taxi: null,
-    taxiTimer: 0,
-    stuntDone: new Set(),
-    courierCar: null,
-    followTarget: null,
-  };
-  // Mission NPCs: Mara at the garage, Sal's phone contact, Kip.
-  G.talkNpcs = [];
-  spawnTalkNpc(G, 'Mara Voss', -60, -60, 0x8a4a2a);
-  spawnTalkNpc(G, 'Sal Vega', 0, 60, 0x2a4a8a);
-  // Mission marker beacon.
-  const beaconGeo = new THREE.CylinderGeometry(0.4, 0.4, 60, 8, 1, true);
-  const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
-  const beacon = new THREE.Mesh(beaconGeo, beaconMat);
-  beacon.position.y = 30;
-  G.scene.add(beacon);
-  const ringGeo = new THREE.TorusGeometry(5, 0.3, 8, 32);
-  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a }));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.3;
-  G.scene.add(ring);
-  G.missions.marker = beacon;
-  G.missions.ring = ring;
-  G.missions.marker.visible = false;
-  G.missions.ring.visible = false;
+function makeBeacon(G) {
+  const geo = new THREE.CylinderGeometry(3, 3, 40, 16, 1, true);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.y = 20;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.2, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd23f, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.15;
+  const grp = new THREE.Group(); grp.add(m); grp.add(ring);
+  grp.visible = false;
+  G.scene.add(grp);
+  return grp;
 }
 
-function spawnTalkNpc(G, name, x, z, color) {
-  const mesh = makePedModel(G.rng);
-  mesh.children[0].material = new THREE.MeshLambertMaterial({ color });
-  mesh.position.set(x, 0, z);
-  G.scene.add(mesh);
-  const npc = { mesh, name, x, z };
-  G.talkNpcs.push(npc);
-  return npc;
+export function createMissions(G) {
+  G.mission = { index: 0, step: 0, state: 'idle', timer: 0, beacon: makeBeacon(G), marker: null, taxi: null, courier: null, tailT: 0 };
+  G.missionFoesLeft = 0;
+  // Stunt ramps.
+  G.ramps = [];
+  for (const [rx, rz] of JUMP_RAMPS) {
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(4, 1.2, 6), new THREE.MeshLambertMaterial({ color: 0xd8a02a }));
+    ramp.position.set(rx, 0.6, rz); ramp.rotation.x = -0.35; ramp.castShadow = true;
+    G.scene.add(ramp);
+    G.ramps.push({ x: rx, z: rz, done: false });
+  }
+  // Shop pickups.
+  spawnPickup(G, 'health', SHOP_POS.guns[0] + 4, SHOP_POS.guns[1]);
+  spawnPickup(G, 'armor', SHOP_POS.guns[0] - 4, SHOP_POS.guns[1]);
+  spawnPickup(G, 'health', SHOP_POS.spray[0], SHOP_POS.spray[1] + 6);
 }
 
 export function startMission(G, index) {
-  const def = MISSION_DEFS[index];
-  if (!def) { G.missions.done = true; G.hud.showEnding(G); return; }
-  G.missions.index = index;
-  G.missions.step = 0;
-  G.missions.stepTimer = 0;
-  G.missions.guardsDown = 0;
-  G.missions.active = true;
-  G.missions.marker.visible = true;
-  G.missions.ring.visible = true;
-  setDialog(G, def.briefing, 6);
-  G.audio?.missionJingle();
-  setupStep(G);
-  G.hud.setToast(`Misi ${index + 1}: ${def.name}`);
+  const def = MISSIONS[index];
+  if (!def) { G.mission.state = 'done-all'; G.hud.showObjective('All missions complete — Solara Bay is yours, Ro.'); return; }
+  G.mission.index = index; G.mission.step = 0; G.mission.state = 'active';
+  G.mission.timer = def.time || 0;
+  G.missionFoesLeft = 0;
+  G.hud.showDialog(def.name, def.briefing);
+  G.hud.showObjective(def.steps[0].text);
+  G.audio.jingle();
+  setupMissionStep(G);
 }
 
-export function setupStep(G) {
-  const def = MISSION_DEFS[G.missions.index];
-  const step = def.steps[G.missions.step];
+function setupMissionStep(G) {
+  const def = MISSIONS[G.mission.index];
+  const step = def.steps[G.mission.step];
   if (!step) { completeMission(G); return; }
-  G.missions.stepTimer = step.time || 0;
-  if (step.x !== undefined) {
-    G.missions.markerPos.set(step.x, 0, step.z);
-    G.missions.marker.position.set(step.x, 30, step.z);
-    G.missions.ring.position.set(step.x, 0.3, step.z);
-  }
-  if (step.type === 'shoot') {
-    G.missions.guardsDown = 0;
-    const gx = step.x ?? 210, gz = step.z ?? 200;
+  const b = G.mission.beacon;
+  b.position.set(step.pos[0], 0, step.pos[1]);
+  b.visible = true;
+  G.mission.marker = { x: step.pos[0], z: step.pos[1] };
+  G.hud.showObjective(step.text);
+  if (step.kind === 'clear') {
     for (let i = 0; i < step.count; i++) {
-      spawnGuard(G, gx + G.rng.range(-14, 14), gz + G.rng.range(-14, 14));
+      spawnGuard(G, step.pos[0] + G.rng.range(-8, 8), step.pos[1] + G.rng.range(-8, 8));
     }
+    G.missionFoesLeft = step.count;
   }
-  if (step.type === 'follow') {
-    // Courier target car that loops along the coast road.
-    const car = spawnCar(G, 'sedan', step.x, step.z, 0, { driver: 'courier' });
-    G.missions.followTarget = car;
+  if (def.id === 4 && step.kind === 'wait') G.timeOfDay = 21.5; // Neon Nights runs at night.
+  if (def.id === 4 && step.kind === 'tail') {
+    const c = spawnCar(G, 'sedan', step.pos[0] + 20, step.pos[1], 0, 'courier');
+    c.speed = 8; c.cruise = 8;
+    G.mission.courier = c;
+    G.mission.tailT = 0;
   }
-  if (step.type === 'chase') {
-    const car = G.missions.followTarget;
-    if (car) car.speed = 20;
+  if (def.id === 5 && step.kind === 'steal') {
+    spawnCar(G, 'sport', step.pos[0], step.pos[1], 0.5, 'parked');
   }
-  if (step.type === 'enterCar' && step.carType) {
-    // Make sure the target car type exists near the marker.
-    const near = G.cars.find((c) => c.type === step.carType && c.mesh.position.distanceTo(G.missions.markerPos) < 40);
-    if (!near) {
-      const yaw = G.rng.range(0, Math.PI * 2);
-      spawnCar(G, step.carType, G.missions.markerPos.x + 4, G.missions.markerPos.z + 4, yaw);
-    }
+  if (step.kind === 'stealTruck') {
+    spawnCar(G, 'truck', step.pos[0], step.pos[1], 0.5, 'parked');
   }
-  if (step.type === 'goto' && G.missions.index === 3) {
-    G.timeOfDay = 21.5; // Neon Nights starts at night.
-  }
-  G.hud.setObjective(step.text);
 }
 
-export function updateMissions(G, dt) {
-  const M = G.missions;
-  if (M.dialogTimer > 0) {
-    M.dialogTimer -= dt;
-    if (M.dialogTimer <= 0) G.hud.setDialog('');
-  }
-  // Start the next mission with N after one completes.
-  if (!M.active && M.pendingNext !== undefined && G.input.pressed('KeyN')) {
-    const n = M.pendingNext;
-    M.pendingNext = undefined;
-    G.hud.setObjective('');
-    startMission(G, n);
-    return;
-  }
-  if (!M.active || G.phase !== 'play') return;
-  const def = MISSION_DEFS[M.index];
-  const step = def.steps[M.step];
-  if (!step) return;
-  const p = G.player;
-  const pos = p.car ? p.car.mesh.position : p.pos;
-  if (M.stepTimer > 0) {
-    M.stepTimer -= dt;
-    if (M.stepTimer <= 0) { failMission(G, 'Waktu habis!'); return; }
-  }
-  const dist = Math.hypot(pos.x - M.markerPos.x, pos.z - M.markerPos.z);
-  switch (step.type) {
-    case 'goto':
-    case 'driveTo':
-      if (dist < (step.r || 8)) advanceStep(G);
-      break;
-    case 'enterCar':
-      if (p.car && (!step.carType || p.car.type === step.carType)) advanceStep(G);
-      break;
-    case 'shoot':
-      if (M.guardsDown >= step.count) advanceStep(G);
-      break;
-    case 'follow': {
-      const t = M.followTarget;
-      if (!t) { advanceStep(G); break; }
-      const tp = t.mesh.position;
-      // Courier drives away along the road.
-      t.mesh.position.x += Math.sin(0.3) * 6 * dt;
-      t.mesh.position.z -= 6 * dt;
-      t.mesh.rotation.y = 0.3;
-      const d = Math.hypot(tp.x - pos.x, tp.z - pos.z);
-      M.markerPos.copy(tp);
-      M.marker.position.set(tp.x, 30, tp.z);
-      M.ring.position.set(tp.x, 0.3, tp.z);
-      if (d > 35) { failMission(G, 'Kurir kabur — kamu ketahuan!'); return; }
-      if (tp.z < -120) advanceStep(G);
-      break;
-    }
-    case 'chase': {
-      const t = M.followTarget;
-      if (t) {
-        t.mesh.position.z += 12 * dt;
-        M.markerPos.copy(t.mesh.position);
-        M.marker.position.set(t.mesh.position.x, 30, t.mesh.position.z);
-        M.ring.position.set(t.mesh.position.x, 0.3, t.mesh.position.z);
-      }
-      if (dist < (step.r || 10)) advanceStep(G);
-      break;
-    }
-  }
-  // Beacon pulse.
-  if (M.marker.visible) {
-    const s = 1 + Math.sin(G.elapsed * 3) * 0.15;
-    M.ring.scale.set(s, s, 1);
-  }
-  updateTaxi(G, dt);
-}
-
-function advanceStep(G) {
-  G.missions.step += 1;
-  G.audio?.blip(880, 0.12, 'sine', 0.15);
-  setupStep(G);
+export function advanceMissionStep(G) {
+  G.mission.step++;
+  G.audio.pickup();
+  const def = MISSIONS[G.mission.index];
+  if (G.mission.step >= def.steps.length) completeMission(G);
+  else setupMissionStep(G);
 }
 
 export function completeMission(G) {
-  const def = MISSION_DEFS[G.missions.index];
+  const def = MISSIONS[G.mission.index];
   G.player.cash += def.reward;
-  G.missions.active = false;
-  G.missions.marker.visible = false;
-  G.missions.ring.visible = false;
-  G.stats.missionsDone += 1;
-  G.audio?.missionJingle();
-  G.hud.showMissionComplete(G, def);
-  G.hud.setObjective('Tekan N untuk misi berikutnya');
-  saveGame(G);
-  if (G.missions.index + 1 < MISSION_DEFS.length) {
-    G.missions.pendingNext = G.missions.index + 1;
-  } else {
-    G.missions.done = true;
-  }
+  G.mission.beacon.visible = false;
+  G.mission.marker = null;
+  G.mission.state = 'complete';
+  G.hud.showBanner('MISSION COMPLETE', `${def.name}  ·  +$${def.reward}`);
+  G.audio.jingle();
+  G.saveGame();
+  setTimeout(() => {
+    if (G.phase === 'play') { startMission(G, G.mission.index + 1); }
+  }, 4000);
 }
 
 export function failMission(G, reason) {
-  const def = MISSION_DEFS[G.missions.index];
-  G.missions.active = false;
-  G.audio?.failJingle();
-  G.hud.showMissionFailed(G, def, reason);
+  const def = MISSIONS[G.mission.index];
+  G.mission.state = 'failed';
+  G.mission.beacon.visible = false;
+  G.audio.fail();
+  G.hud.showBanner('MISSION FAILED', reason);
+  setTimeout(() => {
+    if (G.phase === 'play') { G.player.health = 100; startMission(G, G.mission.index); }
+  }, 3000);
 }
 
-export function retryMission(G) {
-  // Respawn near the mission start, reset wanted, restart the mission.
-  const idx = G.missions.index;
-  G.player.hp = CFG.maxHealth;
-  G.player.armor = 0;
-  clearWanted(G);
-  for (const guard of [...G.enemies]) {
-    const i = G.enemies.indexOf(guard);
-    if (i >= 0) G.enemies.splice(i, 1);
-    G.scene.remove(guard.mesh);
-  }
-  G.phase = 'play';
-  startMission(G, idx);
-}
+function distTo(p, x, z) { return Math.hypot(p.x - x, p.z - z); }
 
-export function onGuardDown(G) {
-  G.missions.guardsDown += 1;
-  const def = MISSION_DEFS[G.missions.index];
-  const step = def?.steps[G.missions.step];
-  if (step && step.type === 'shoot') {
-    G.hud.setObjective(`Lumpuhkan penjaga Dario (${G.missions.guardsDown}/${step.count})`);
-  }
-}
-
-export function talkToNpc(G, npc) {
-  const lines = {
-    'Mara Voss': 'Mara: "Bengkelku terbuka 24 jam. Parkir mobil curian di sini — aku simpan."',
-    'Sal Vega': 'Sal: "Utangmu $2.000. Selesaikan lima pekerjaan, kita impas."',
-  };
-  setDialog(G, lines[npc.name] || `${npc.name}: "Hati-hati di jalan."`, 5);
-  G.audio?.blip(520, 0.1, 'sine', 0.12);
-}
-
-export function setDialog(G, text, seconds = 5) {
-  G.missions.dialog = text;
-  G.missions.dialogTimer = seconds;
-  G.hud.setDialog(text);
-}
-
-export function gameOver(G, title) {
-  if (G.phase === 'over') return;
-  G.phase = 'over';
-  G.audio?.failJingle();
-  G.audio?.setSiren(false);
-  G.input.unlockPointer();
-  G.hud.showGameOver(G, title);
-}
-
-// --- Side activities -------------------------------------------------------
-export function startTaxi(G) {
-  if (G.missions.taxi) return;
-  const p = G.player;
-  if (!p.car || p.car.type !== 'taxi') { G.hud.setToast('Butuh taksi Cabro untuk kerja taksi'); return; }
-  const spots = [[-180, -180], [150, -150], [60, 180], [-60, 180]];
-  const dest = spots[G.rng.int(0, spots.length - 1)];
-  G.missions.taxi = { x: dest[0], z: dest[1], timer: 90 };
-  G.missions.markerPos.set(dest[0], 0, dest[1]);
-  G.missions.marker.visible = true;
-  G.missions.ring.visible = true;
-  G.missions.ring.position.set(dest[0], 0.3, dest[1]);
-  G.missions.marker.position.set(dest[0], 30, dest[1]);
-  G.hud.setObjective('Taksi: antar penumpang ke marker (90 dtk)');
-  G.audio?.horn();
-}
-
-function updateTaxi(G, dt) {
-  const T = G.missions.taxi;
-  if (!T) return;
-  T.timer -= dt;
-  const pos = G.player.car ? G.player.car.mesh.position : G.player.pos;
-  if (Math.hypot(pos.x - T.x, pos.z - T.z) < 8) {
-    G.player.cash += 60;
-    G.stats.taxiFares += 1;
-    G.audio?.coin();
-    G.hud.setToast('Tarif taksi selesai! +$60');
-    G.missions.taxi = null;
-    if (!G.missions.active) {
-      G.missions.marker.visible = false;
-      G.missions.ring.visible = false;
+export function updateMissions(G, dt) {
+  const m = G.mission;
+  if (m.state === 'active') {
+    const def = MISSIONS[m.index];
+    const step = def.steps[m.step];
+    if (!step) return;
+    if (m.timer > 0) {
+      m.timer -= dt;
+      if (m.timer <= 0) { failMission(G, 'Out of time.'); return; }
     }
-    return;
+    const p = G.player.pos;
+    if (step.kind === 'goto' || step.kind === 'wait') {
+      if (distTo(p, step.pos[0], step.pos[1]) < (step.radius || 9)) advanceMissionStep(G);
+    } else if (step.kind === 'clear') {
+      if (G.missionFoesLeft <= 0 && G.enemies.length === 0) advanceMissionStep(G);
+    } else if (step.kind === 'steal' || step.kind === 'stealTruck') {
+      if (!G.player.onFoot && G.playerCar) {
+        if (step.kind === 'stealTruck' && G.playerCar.type !== 'truck') {
+          // Wrong car — keep waiting.
+        } else advanceMissionStep(G);
+      }
+    } else if (step.kind === 'tail') {
+      const c = m.courier;
+      if (c) {
+        const d = distTo(p, c.x, c.z);
+        c.x += Math.sin(c.yaw) * 6 * dt; c.z += Math.cos(c.yaw) * 6 * dt;
+        c.yaw += Math.sin(G.time * 0.3) * dt * 0.4;
+        c.group.position.set(c.x, 0, c.z); c.group.rotation.y = c.yaw;
+        if (d < 10) { failMission(G, 'The courier spotted you.'); return; }
+        if (d < 42) { m.tailT += dt; if (m.tailT > 12) advanceMissionStep(G); }
+        else m.tailT = Math.max(0, m.tailT - dt);
+      }
+    } else if (step.kind === 'chase') {
+      const c = m.courier;
+      if (c) {
+        c.speed = 22;
+        const dx = p.x - c.x, dz = p.z - c.z;
+        const d = Math.hypot(dx, dz) || 1;
+        c.yaw = Math.atan2(dx, dz) + Math.PI; // flee away from player
+        c.x += Math.sin(c.yaw) * c.speed * dt; c.z += Math.cos(c.yaw) * c.speed * dt;
+        c.group.position.set(c.x, 0, c.z); c.group.rotation.y = c.yaw;
+        if (d < 4 && Math.abs((G.playerCar?.speed || 0)) > 5) {
+          G.effects.burst(c.x, 1.5, c.z, 0xffaa00, 20);
+          G.scene.remove(c.group); G.cars.splice(G.cars.indexOf(c), 1);
+          G.mission.courier = null;
+          advanceMissionStep(G);
+        }
+      }
+    } else if (step.kind === 'escape') {
+      if (distTo(p, step.pos[0], step.pos[1]) < (step.radius || 14)) {
+        G.wanted = 0; G.audio.setSiren(false);
+        advanceMissionStep(G);
+      }
+    }
+    // Mission 5 escape: wanted 4 while driving the Aurelia.
+    if (def.id === 5 && m.step === 2 && G.wanted < 4) G.addWanted(4 - G.wanted, 'the whole city is after the Aurelia');
+    if (def.id === 3 && m.step === 2 && G.wanted < 2) G.addWanted(2 - G.wanted, 'the Docks crew called it in');
   }
-  if (T.timer <= 0) {
-    G.missions.taxi = null;
-    G.hud.setToast('Penumpang batal — terlalu lama');
-    if (!G.missions.active) {
-      G.missions.marker.visible = false;
-      G.missions.ring.visible = false;
+
+  // Taxi fares: press E near a waiting passenger.
+  if (!m.taxi) {
+    const near = G.peds.find((pd) => pd.taxi && distTo(G.player.pos, pd.x, pd.z) < 3);
+    if (near) G.hud.showPrompt('E — Pick up taxi fare');
+    else if (G.player.onFoot) {
+      const spot = TAXI_SPOTS.find(([sx, sz]) => distTo(G.player.pos, sx, sz) < 4 && !G.peds.some((pd) => pd.taxi && Math.hypot(pd.x - sx, pd.z - sz) < 6));
+      if (spot && G.rng.chance(dt * 0.05)) {
+        const pd = G.spawnPed(spot[0] + 2, spot[1] + 2);
+        pd.state = 'wait'; pd.taxi = true;
+      }
+    }
+  } else {
+    const dest = m.taxi.dest;
+    if (distTo(G.player.pos, dest[0], dest[1]) < 9) {
+      G.player.cash += CONFIG.taxiFare;
+      G.hud.toast(`Fare complete +$${CONFIG.taxiFare}`);
+      G.audio.jingle();
+      m.taxi = null; m.beacon.visible = m.state === 'active';
     }
   }
-}
-
-export function checkStuntJump(G, car) {
-  // Ramps near the beach: jumping with speed over one awards cash.
-  const ramps = [[-250, -120], [-250, 120], [200, -200]];
-  for (const [rx, rz] of ramps) {
-    const key = `${rx},${rz}`;
-    if (G.missions.stuntDone.has(key)) continue;
-    if (Math.hypot(car.mesh.position.x - rx, car.mesh.position.z - rz) < 6 && Math.abs(car.speed) > 20) {
-      G.missions.stuntDone.add(key);
-      G.player.cash += 80;
-      G.audio?.missionJingle();
-      G.hud.setToast('Stunt jump! +$80');
+  if (G.input.wasPressed('KeyE') && !m.taxi) {
+    const near = G.peds.find((pd) => pd.taxi && distTo(G.player.pos, pd.x, pd.z) < 3);
+    if (near) {
+      const dest = TAXI_SPOTS[Math.floor(G.rng.next() * TAXI_SPOTS.length)];
+      m.taxi = { dest, ped: near };
+      removePed(G, near);
+      m.beacon.position.set(dest[0], 0, dest[1]); m.beacon.visible = true;
+      G.hud.showObjective(`Taxi fare — drive to (${Math.round(dest[0])}, ${Math.round(dest[1])})`);
+      G.hud.toast('Passenger aboard — drive to the marker');
     }
   }
-}
 
-// --- Save / load -----------------------------------------------------------
-export function saveGame(G) {
-  try {
-    const data = {
-      cash: G.player.cash,
-      mission: G.missions.index,
-      missionsDone: G.stats.missionsDone,
-      coins: G.stats.coins,
-      carsStolen: G.stats.carsStolen,
-      maxWanted: G.stats.maxWanted,
-      taxiFares: G.stats.taxiFares,
-      garage: G.garage.map((c) => c.type),
-      timeOfDay: G.timeOfDay,
-    };
-    localStorage.setItem(CFG.saveKey, JSON.stringify(data));
-    G.hud.setToast('Game disimpan');
-    return true;
-  } catch { return false; }
-}
+  // Stunt jumps: drive over a ramp fast.
+  for (const ramp of G.ramps) {
+    if (ramp.done) continue;
+    if (G.playerCar && distTo(G.player.pos, ramp.x, ramp.z) < 3 && Math.abs(G.playerCar.speed) > 18) {
+      ramp.done = true;
+      G.player.cash += CONFIG.jumpReward;
+      G.hud.showBanner('STUNT JUMP!', `+$${CONFIG.jumpReward}`);
+      G.audio.jingle();
+    }
+  }
 
-export function loadGame(G) {
-  try {
-    const raw = localStorage.getItem(CFG.saveKey);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    G.player.cash = data.cash ?? 0;
-    G.stats.missionsDone = data.missionsDone ?? 0;
-    G.stats.coins = data.coins ?? 0;
-    G.stats.carsStolen = data.carsStolen ?? 0;
-    G.stats.maxWanted = data.maxWanted ?? 0;
-    G.stats.taxiFares = data.taxiFares ?? 0;
-    G.timeOfDay = data.timeOfDay ?? CFG.startHour;
-    return data;
-  } catch { return null; }
-}
+  // Sun coins (spun + hidden by updateCityFx).
+  for (const coin of G.coins) {
+    if (coin.taken) continue;
+    if (distTo(G.player.pos, coin.x, coin.z) < 2.2) {
+      coin.taken = true;
+      G.player.cash += CONFIG.coinValue;
+      G.stats.coins++;
+      G.audio.pickup();
+      G.hud.toast(`Sun coin +$${CONFIG.coinValue} (${G.stats.coins}/30)`);
+    }
+  }
 
-export function hasSave() {
-  try { return !!localStorage.getItem(CFG.saveKey); } catch { return false; }
+  // Shops: respray + guns.
+  if (distTo(G.player.pos, SHOP_POS.spray[0], SHOP_POS.spray[1]) < 8 && G.wanted > 0) {
+    G.hud.showPrompt(`E — Spray & Shine: clear wanted for $${G.wanted * CONFIG.resprayPerStar}`);
+    if (G.input.wasPressed('KeyE') && G.player.cash >= G.wanted * CONFIG.resprayPerStar) {
+      G.player.cash -= G.wanted * CONFIG.resprayPerStar;
+      G.wanted = 0; G.audio.setSiren(false);
+      G.hud.toast('Fresh paint. Heat is off.');
+    }
+  }
+  if (distTo(G.player.pos, SHOP_POS.guns[0], SHOP_POS.guns[1]) < 6 && !G.player.hasPistol) {
+    G.hud.showPrompt(`E — Buy pistol ($${CONFIG.pistolPrice})`);
+    if (G.input.wasPressed('KeyE') && G.player.cash >= CONFIG.pistolPrice) {
+      G.player.cash -= CONFIG.pistolPrice;
+      G.player.hasPistol = true; G.player.weapon = 1; G.player.ammo = 12;
+      G.hud.toast('Pistol bought — press 2 to equip');
+    }
+  }
 }

@@ -1,192 +1,131 @@
-// Wanted level 0-5 + police AI (patrol cars and foot officers).
+// Wanted level (0–5 stars) + police AI (patrol cars + foot officers).
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { spawnCar, removeCar } from './vehicles.js';
-import { makePedModel, scarePedestrians } from './traffic.js';
-import { spawnParticles } from './render.js';
+import { CONFIG } from './config.js';
+import { spawnCar } from './vehicles.js';
+import { collideBuildings } from './city.js';
+import { removePed } from './traffic.js';
 
-export function createPolice(G) {
-  G.policeCars = [];
-  G.footPolice = [];
-  G.wanted = 0;
-  G.heatTimer = 0;
-  G.hiddenTimer = 0;
-  G.lastWantedReason = '';
+export function addWanted(G, stars, reason) {
+  if (G.wanted >= CONFIG.maxWanted) return;
+  G.wanted = Math.min(CONFIG.maxWanted, G.wanted + stars);
+  G.stats.maxWanted = Math.max(G.stats.maxWanted, G.wanted);
+  G.hiddenT = 0;
+  if (reason) G.hud.toast(`Wanted +${stars} — ${reason}`);
+  G.audio.setSiren(G.wanted > 0);
+}
+
+export function updateWantedLevel(G, dt) {
+  const p = G.player.pos;
+  let nearest = Infinity;
+  for (const pc of G.policeCars) nearest = Math.min(nearest, Math.hypot(pc.x - p.x, pc.z - p.z));
+  for (const po of G.footPolice) nearest = Math.min(nearest, Math.hypot(po.x - p.x, po.z - p.z));
+  if (G.wanted > 0) {
+    if (nearest > 45) {
+      G.hiddenT += dt;
+      if (G.hiddenT > CONFIG.wantedDecayHidden) {
+        G.wanted = Math.max(0, G.wanted - 1);
+        G.hiddenT = CONFIG.wantedDecayHidden - 5;
+        if (G.wanted === 0) { G.hud.toast('You lost them. Heat is off.'); G.audio.setSiren(false); }
+      }
+    } else G.hiddenT = 0;
+  }
+  // Spawn to match wanted level.
+  const wantCars = G.wanted >= 2 ? Math.min(4, G.wanted - 1) : 0;
+  const wantFoot = G.wanted === 1 ? 2 : G.wanted >= 2 ? 1 : 0;
+  while (G.policeCars.length < wantCars) spawnPoliceCar(G);
+  while (G.policeCars.length > wantCars) removePoliceCar(G, G.policeCars[0]);
+  while (G.footPolice.length < wantFoot) spawnFootPolice(G);
+  while (G.footPolice.length > wantFoot) removeFootPolice(G, G.footPolice[0]);
 }
 
 export function spawnPoliceCar(G) {
-  const p = G.player.car ? G.player.car.mesh.position : G.player.pos;
-  const angle = G.rng.range(0, Math.PI * 2);
-  const x = THREE.MathUtils.clamp(p.x + Math.cos(angle) * 60, -260, 260);
-  const z = THREE.MathUtils.clamp(p.z + Math.sin(angle) * 60, -260, 260);
-  const car = spawnCar(G, 'sedan', x, z, 0, { police: true });
-  car.mesh.children.forEach((c) => {
-    if (c.material && c.material.color) {
-      // White body for police cars.
-      if (c.geometry && c.geometry.type === 'BoxGeometry' && c.position.y < 1.1) {
-        c.material = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
-      }
-    }
-  });
-  car.isPolice = true;
-  car.sirenPhase = G.rng.range(0, 6);
+  const rng = G.rng;
+  const p = G.player.pos;
+  const a = rng.range(0, Math.PI * 2);
+  const x = Math.max(-240, Math.min(240, p.x + Math.cos(a) * 70));
+  const z = Math.max(-240, Math.min(240, p.z + Math.sin(a) * 70));
+  const car = spawnCar(G, 'sedan', x, z, 0, 'police');
+  car.group.children[0].material = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  // Light bar.
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+  bar.position.set(0, 1.5, 0); car.group.add(bar);
+  car.lightBar = bar;
+  car.speed = 10; car.cruise = 30;
   G.policeCars.push(car);
   return car;
 }
 
+function removePoliceCar(G, car) {
+  G.scene.remove(car.group);
+  G.cars.splice(G.cars.indexOf(car), 1);
+  G.policeCars.splice(G.policeCars.indexOf(car), 1);
+}
+
 export function spawnFootPolice(G) {
   const p = G.player.pos;
-  const angle = G.rng.range(0, Math.PI * 2);
-  const mesh = makePedModel(G.rng);
-  mesh.children[0].material = new THREE.MeshLambertMaterial({ color: 0x1a2a4a });
-  mesh.position.set(
-    THREE.MathUtils.clamp(p.x + Math.cos(angle) * 25, -260, 260), 0,
-    THREE.MathUtils.clamp(p.z + Math.sin(angle) * 25, -260, 260));
-  G.scene.add(mesh);
-  const cop = { mesh, hp: 40, speed: 4.2, punchCooldown: 0, walkPhase: 0 };
-  G.footPolice.push(cop);
-  return cop;
+  const a = G.rng.range(0, Math.PI * 2);
+  const po = G.spawnPed(p.x + Math.cos(a) * 25, p.z + Math.sin(a) * 25);
+  po.state = 'police'; po.speed = 3.2; po.bustT = 0;
+  // Dark uniform via instance colours.
+  G.pedMeshes.body.setColorAt(po.slot, new THREE.Color(0x1a2a4a));
+  G.pedMeshes.armL.setColorAt(po.slot, new THREE.Color(0x1a2a4a));
+  G.pedMeshes.armR.setColorAt(po.slot, new THREE.Color(0x1a2a4a));
+  G.pedMeshes.body.instanceColor.needsUpdate = true;
+  G.pedMeshes.armL.instanceColor.needsUpdate = true;
+  G.pedMeshes.armR.instanceColor.needsUpdate = true;
+  G.footPolice.push(po);
+  return po;
 }
 
-export function removePoliceCar(G, car) {
-  const i = G.policeCars.indexOf(car);
-  if (i >= 0) G.policeCars.splice(i, 1);
-  removeCar(G, car);
+function removeFootPolice(G, po) {
+  removePed(G, po);
+  G.footPolice.splice(G.footPolice.indexOf(po), 1);
 }
 
-export function removeFootPolice(G, cop) {
-  const i = G.footPolice.indexOf(cop);
-  if (i >= 0) G.footPolice.splice(i, 1);
-  G.scene.remove(cop.mesh);
-}
-
-// Wanted stars: police numbers scale with stars; heat decays when hidden.
-export function updateWantedLevel(G, dt) {
-  const p = G.player;
-  const playerPos = p.car ? p.car.mesh.position : p.pos;
-  const wantedCars = G.wanted >= 2 ? Math.min(4, G.wanted - 1) : 0;
-  const wantedFoot = G.wanted >= 1 ? Math.min(4, G.wanted + 1) : 0;
-  while (G.policeCars.length < wantedCars) spawnPoliceCar(G);
-  while (G.policeCars.length > wantedCars) removePoliceCar(G, G.policeCars[0]);
-  while (G.footPolice.length < wantedFoot) spawnFootPolice(G);
-  while (G.footPolice.length > wantedFoot) removeFootPolice(G, G.footPolice[0]);
-
-  // Heat: if no police can see the player, the timer counts down.
-  let seen = false;
+export function updatePolice(G, dt) {
+  const p = G.player.pos;
+  const t = G.time;
   for (const car of G.policeCars) {
-    const d = car.mesh.position.distanceTo(playerPos);
-    if (d < 70) { seen = true; break; }
-  }
-  for (const cop of G.footPolice) {
-    if (cop.mesh.position.distanceTo(playerPos) < 30) { seen = true; break; }
-  }
-  if (G.wanted > 0) {
-    if (seen) { G.heatTimer = 0; G.hiddenTimer = 0; }
-    else {
-      G.hiddenTimer += dt;
-      if (G.hiddenTimer > CFG.heatHideSec && G.wanted > 0) {
-        G.wanted -= 1;
-        G.hiddenTimer = 0;
-        G.hud.setToast(`Wanted turun — ${G.wanted} bintang`);
-      }
-      if (G.hiddenTimer > CFG.heatClearSec) G.wanted = 0;
+    const dx = p.x - car.x, dz = p.z - car.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const wantYaw = Math.atan2(dx, dz);
+    let diff = wantYaw - car.yaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.yaw += Math.max(-2.2 * dt, Math.min(2.2 * dt, diff));
+    const targetSpeed = d > 6 ? 30 : 12;
+    car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 1.2);
+    const nx = car.x + Math.sin(car.yaw) * car.speed * dt;
+    const nz = car.z + Math.cos(car.yaw) * car.speed * dt;
+    const res = collideBuildings(G, nx, nz, 1.6);
+    car.x = res.x; car.z = res.z;
+    car.group.position.set(car.x, 0, car.z);
+    car.group.rotation.y = car.yaw;
+    car.wheelSpin += car.speed * dt * 2.4;
+    if (car.lightBar) car.lightBar.material.color.setHex(Math.sin(t * 10) > 0 ? 0xff2222 : 0x2244ff);
+    // Ram the player's car.
+    if (G.playerCar && d < 3.6) {
+      G.playerCar.speed *= 0.85;
+      G.playerCar.health -= 2 * dt * 10;
+      if (G.playerCar.health <= 0) G.explodeCar(G.playerCar);
     }
   }
-  G.audio?.setSiren(G.wanted >= 2 && G.policeCars.length > 0);
-  updatePoliceCars(G, dt, playerPos);
-  updateFootPolice(G, dt, playerPos);
-}
-
-function updatePoliceCars(G, dt, playerPos) {
-  for (const car of [...G.policeCars]) {
-    const p = car.mesh.position;
-    const dx = playerPos.x - p.x, dz = playerPos.z - p.z;
-    const dist = Math.hypot(dx, dz);
-    const targetYaw = Math.atan2(-dx, -dz);
-    let dy = targetYaw - car.yaw;
-    while (dy > Math.PI) dy -= Math.PI * 2;
-    while (dy < -Math.PI) dy += Math.PI * 2;
-    car.yaw += THREE.MathUtils.clamp(dy, -1.8 * dt, 1.8 * dt);
-    const wantSpeed = dist > 6 ? 30 : 8;
-    car.speed += (wantSpeed - car.speed) * Math.min(1, dt * 1.2);
-    p.x += -Math.sin(car.yaw) * car.speed * dt;
-    p.z += -Math.cos(car.yaw) * car.speed * dt;
-    p.x = THREE.MathUtils.clamp(p.x, -295, 295);
-    p.z = THREE.MathUtils.clamp(p.z, -295, 295);
-    car.mesh.rotation.y = car.yaw;
-    // Ram the player: damage on contact.
-    if (dist < 3.2) {
-      car.speed *= 0.4;
-      if (G.player.car) {
-        G.player.car.hp -= 6 * dt * 10;
-        spawnParticles(G, { x: p.x, y: 1, z: p.z }, 0xffaa22, 2, 2, 2, 0.4);
-      } else {
-        damagePlayer(G, 12 * dt);
-      }
-      G.audio?.blip(120, 0.1, 'square', 0.12);
+  for (const po of [...G.footPolice]) {
+    const dx = p.x - po.x, dz = p.z - po.z;
+    const d = Math.hypot(dx, dz) || 1;
+    po.yaw = Math.atan2(dx, dz);
+    if (G.player.onFoot) {
+      po.x += (dx / d) * po.speed * dt; po.z += (dz / d) * po.speed * dt;
+      if (d < 1.6) {
+        po.bustT += dt;
+        if (po.bustT > 2) { G.busted(); return; }
+      } else po.bustT = 0;
+      if (d < 8) G.hud.showPrompt('Police closing in — run!');
+    } else {
+      // Player in a car: officer stands and watches, radios it in.
+      if (d < 30 && G.rng.chance(dt * 0.1)) addWanted(G, 0, '');
     }
-    // Flashing light bar.
-    car.sirenPhase += dt * 6;
-    const bar = car.mesh.children.find((c) => c.geometry && c.geometry.type === 'BoxGeometry' && c.position.y > 1.4);
-    if (bar) bar.material.color.setHex(Math.sin(car.sirenPhase) > 0 ? 0xff2222 : 0x2244ff);
+    // Position/animation are written by updatePeds from x/z/yaw.
   }
-}
-
-function updateFootPolice(G, dt, playerPos) {
-  for (const cop of [...G.footPolice]) {
-    const p = cop.mesh.position;
-    const dx = playerPos.x - p.x, dz = playerPos.z - p.z;
-    const dist = Math.hypot(dx, dz);
-    const yaw = Math.atan2(-dx, -dz);
-    cop.mesh.rotation.y = yaw;
-    if (dist > 1.6) {
-      p.x += -Math.sin(yaw) * cop.speed * dt;
-      p.z += -Math.cos(yaw) * cop.speed * dt;
-      cop.walkPhase += dt * 8;
-      const swing = Math.sin(cop.walkPhase) * 0.5;
-      cop.mesh.userData.legL.rotation.x = swing;
-      cop.mesh.userData.legR.rotation.x = -swing;
-    } else if (G.player.onFoot) {
-      cop.punchCooldown -= dt;
-      if (cop.punchCooldown <= 0) {
-        cop.punchCooldown = 1.1;
-        damagePlayer(G, 8);
-        spawnParticles(G, { x: playerPos.x, y: 1.4, z: playerPos.z }, 0xff4444, 4, 2, 2, 0.4);
-        G.audio?.punch();
-      }
-    }
-  }
-}
-
-export function damagePlayer(G, amount) {
-  const p = G.player;
-  if (p.armor > 0) {
-    const absorbed = Math.min(p.armor, amount);
-    p.armor -= absorbed;
-    amount -= absorbed;
-  }
-  p.hp -= amount;
-  G.stats.maxWanted = Math.max(G.stats.maxWanted, G.wanted);
-  if (p.hp <= 0) {
-    p.hp = 0;
-    G.missions.gameOver(G, 'K.O.');
-  }
-}
-
-export function clearWanted(G) {
-  G.wanted = 0;
-  G.hiddenTimer = 0;
-  G.heatTimer = 0;
-}
-
-// Respray shop: pay $100 per star to clear the wanted level.
-export function tryRespray(G) {
-  if (G.wanted === 0) { G.hud.setToast('Tidak ada bintang wanted'); return false; }
-  const cost = G.wanted * CFG.resprayPerStar;
-  if (G.player.cash < cost) { G.hud.setToast(`Respray butuh $${cost}`); return false; }
-  G.player.cash -= cost;
-  clearWanted(G);
-  G.audio?.missionJingle();
-  G.hud.setToast('Respray selesai — wanted hilang!');
-  return true;
+  G.audio.updateSiren(t);
 }

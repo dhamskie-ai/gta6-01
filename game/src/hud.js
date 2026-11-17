@@ -1,202 +1,142 @@
-// HUD: DOM bars, stars, cash, clock, objective, prompt, dialog, minimap
-// canvas, title/pause/game-over screens, save/load buttons.
-import { CFG } from './config.js';
-import { roadCoords } from './city.js';
-import { saveGame, loadGame, hasSave, startMission, retryMission } from './missions.js';
+// HUD: DOM bars/stars/cash/clock, minimap canvas, menus, save/load.
+import { MISSIONS, SHOP_POS } from './config.js';
 
 export function createHud(G) {
   const $ = (id) => document.getElementById(id);
   const hud = {
-    el: {
-      health: $('health-fill'), armor: $('armor-fill'), cash: $('cash'),
-      stars: $('stars'), speed: $('speed'), weapon: $('weapon'),
-      clock: $('clock'), objective: $('objective'), prompt: $('prompt'),
-      dialog: $('dialog'), toast: $('toast'),
-      title: $('title-screen'), pause: $('pause-screen'),
-      over: $('over-screen'), overTitle: $('over-title'),
-      missionDone: $('mission-done'), missionDoneText: $('mission-done-text'),
-      missionFail: $('mission-fail'), missionFailText: $('mission-fail-text'),
-      ending: $('ending-screen'),
-      minimap: $('minimap'),
+    el: $('hud'), healthFill: $('health-fill'), armorFill: $('armor-fill'),
+    weapon: $('weapon'), stars: $('stars'), cash: $('cash'), clock: $('clock'),
+    objective: $('objective'), prompt: $('prompt'), dialog: $('dialog'),
+    toastEl: $('toast'), speed: $('speed'), minimap: $('minimap'),
+    banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
+    title: $('title'), pause: $('pause'), gameover: $('gameover'),
+    toastT: 0, dialogT: 0, bannerT: 0,
+    showPrompt(text) {
+      hud.prompt.style.display = text ? 'block' : 'none';
+      hud.prompt.textContent = text;
     },
-    toastTimer: 0,
-    setHealth(hp, armor) {
-      hud.el.health.style.width = `${Math.max(0, hp)}%`;
-      hud.el.armor.style.width = `${Math.max(0, armor)}%`;
+    showObjective(text) { hud.objective.textContent = text; },
+    showDialog(who, text) {
+      hud.dialog.innerHTML = `<b>${who}:</b> ${text}`;
+      hud.dialog.style.display = 'block'; hud.dialogT = 7;
     },
-    setCash(c) { hud.el.cash.textContent = `$${Math.floor(c)}`; },
-    setStars(n) {
-      let s = '';
-      for (let i = 0; i < CFG.maxWanted; i++) s += i < n ? '★' : '☆';
-      hud.el.stars.textContent = s;
-      hud.el.stars.style.color = n > 0 ? '#ffd24a' : '#888';
+    toast(text) {
+      hud.toastEl.textContent = text; hud.toastEl.style.display = 'block'; hud.toastT = 3;
     },
-    setSpeed(kmh, driving) {
-      hud.el.speed.textContent = driving ? `${Math.round(Math.abs(kmh))} km/h` : '';
+    showBanner(title, sub) {
+      hud.bannerTitle.textContent = title; hud.bannerSub.textContent = sub || '';
+      hud.banner.style.display = 'block'; hud.bannerT = 3;
     },
-    setWeapon(w, ammo) {
-      hud.el.weapon.textContent = w === 'pistol' ? `Pistol ${ammo}/12` : 'Tinju';
-    },
-    setClock(hour) {
-      const h = Math.floor(hour) % 24;
-      const m = Math.floor((hour % 1) * 60);
-      hud.el.clock.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-    },
-    setObjective(t) { hud.el.objective.textContent = t || ''; },
-    setPrompt(t) { hud.el.prompt.textContent = t || ''; },
-    setDialog(t) { hud.el.dialog.textContent = t || ''; hud.el.dialog.style.display = t ? 'block' : 'none'; },
-    setToast(t) {
-      hud.el.toast.textContent = t;
-      hud.el.toast.style.display = 'block';
-      hud.toastTimer = 3;
-    },
-    hideToast() { hud.el.toast.style.display = 'none'; },
-    showMissionComplete(G2, def) {
-      hud.el.missionDoneText.textContent = `Misi selesai: ${def.name}  +$${def.reward}`;
-      hud.el.missionDone.style.display = 'block';
-      setTimeout(() => { hud.el.missionDone.style.display = 'none'; }, 3500);
-    },
-    showMissionFailed(G2, def, reason) {
-      hud.el.missionFailText.textContent = `Misi gagal: ${reason}`;
-      hud.el.missionFail.style.display = 'block';
-    },
-    hideMissionFail() { hud.el.missionFail.style.display = 'none'; },
-    showGameOver(G2, title) {
-      hud.el.overTitle.textContent = title;
-      hud.el.over.style.display = 'flex';
-    },
-    hideGameOver() { hud.el.over.style.display = 'none'; },
-    showEnding(G2) {
-      hud.el.ending.style.display = 'flex';
-    },
-    update(G2, dt) {
-      const p = G2.player;
-      hud.setHealth(p.hp, p.armor);
-      hud.setCash(p.cash);
-      hud.setStars(G2.wanted);
-      hud.setSpeed(p.car ? p.car.speed * 3.6 : 0, !!p.car);
-      hud.setWeapon(p.weapon, p.ammo);
-      hud.setClock(G2.timeOfDay);
-      if (hud.toastTimer > 0) {
-        hud.toastTimer -= dt;
-        if (hud.toastTimer <= 0) hud.hideToast();
-      }
-      drawMinimap(G2);
+    flashDamage() {
+      hud.healthFill.style.background = '#ff4444';
+      setTimeout(() => { hud.healthFill.style.background = '#3ddc5f'; }, 150);
     },
   };
-  wireButtons(G, hud);
+  G.hud = hud;
+  $('btn-new').addEventListener('click', () => { G.audio.resume(); G.audio.startMusic(); G.newGame(); });
+  $('btn-continue').addEventListener('click', () => { G.audio.resume(); G.audio.startMusic(); G.continueGame(); });
+  $('btn-resume').addEventListener('click', () => G.resumeGame());
+  $('btn-save').addEventListener('click', () => { G.saveGame(); hud.toast('Game saved'); });
+  $('btn-restart-mission').addEventListener('click', () => { G.resumeGame(); G.restartMission(); });
+  $('btn-quit').addEventListener('click', () => { G.saveGame(); G.quitToTitle(); });
+  $('btn-retry').addEventListener('click', () => { G.retryMission(); });
+  $('btn-title').addEventListener('click', () => G.quitToTitle());
   return hud;
 }
 
-function wireButtons(G, hud) {
-  const $ = (id) => document.getElementById(id);
-  $('btn-new').addEventListener('click', () => {
-    G.audio?.ensure();
-    hud.el.title.style.display = 'none';
-    G.phase = 'play';
-    G.input.lockPointer();
-    startMission(G, 0);
-  });
-  $('btn-continue').addEventListener('click', () => {
-    G.audio?.ensure();
-    const save = loadGame(G);
-    hud.el.title.style.display = 'none';
-    G.phase = 'play';
-    G.input.lockPointer();
-    if (save) startMission(G, Math.min(save.mission ?? 0, 4));
-    else startMission(G, 0);
-  });
-  $('btn-resume').addEventListener('click', () => {
-    hud.el.pause.style.display = 'none';
-    G.phase = 'play';
-    G.input.lockPointer();
-  });
-  $('btn-save').addEventListener('click', () => {
-    saveGame(G);
-    hud.setToast('Game disimpan');
-  });
-  $('btn-restart-mission').addEventListener('click', () => {
-    hud.el.pause.style.display = 'none';
-    hud.hideMissionFail();
-    retryMission(G);
-  });
-  $('btn-quit').addEventListener('click', () => {
-    saveGame(G);
-    hud.el.pause.style.display = 'none';
-    hud.el.title.style.display = 'flex';
-    G.phase = 'title';
-    G.input.unlockPointer();
-  });
-  $('btn-retry').addEventListener('click', () => {
-    hud.hideMissionFail();
-    retryMission(G);
-  });
-  $('btn-over-retry').addEventListener('click', () => {
-    hud.hideGameOver();
-    retryMission(G);
-  });
-  $('btn-over-title').addEventListener('click', () => {
-    hud.hideGameOver();
-    hud.el.title.style.display = 'flex';
-    G.phase = 'title';
-  });
-  $('btn-ending-close').addEventListener('click', () => {
-    hud.el.ending.style.display = 'none';
-    G.phase = 'play';
-  });
-  if (!hasSave()) $('btn-continue').style.opacity = '0.4';
+export function updateHud(G, dt) {
+  const hud = G.hud;
+  const p = G.player;
+  hud.healthFill.style.width = `${Math.max(0, p.health)}%`;
+  hud.armorFill.style.width = `${Math.max(0, p.armor)}%`;
+  hud.weapon.textContent = p.weapon === 1 ? `Pistol — ${p.ammo} / 12` : 'Fists';
+  hud.stars.textContent = '★'.repeat(G.wanted) + '☆'.repeat(5 - G.wanted);
+  hud.cash.textContent = `$${p.cash}`;
+  const h = Math.floor(G.timeOfDay) % 24, m = Math.floor((G.timeOfDay % 1) * 60);
+  hud.clock.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  hud.speed.innerHTML = G.playerCar ? `${Math.round(Math.abs(G.playerCar.speed) * 3.6)}<small>km/h · ${G.playerCar.spec.name}</small>` : '0<small>km/h · on foot</small>';
+  if (hud.toastT > 0) { hud.toastT -= dt; if (hud.toastT <= 0) hud.toastEl.style.display = 'none'; }
+  if (hud.dialogT > 0) { hud.dialogT -= dt; if (hud.dialogT <= 0) hud.dialog.style.display = 'none'; }
+  if (hud.bannerT > 0) { hud.bannerT -= dt; if (hud.bannerT <= 0) hud.banner.style.display = 'none'; }
+  drawMinimap(G);
 }
 
-// Minimap: 180x180, north-up, roads + dots for player/police/marker/shops.
-export function drawMinimap(G) {
-  const cv = document.getElementById('minimap');
-  if (!cv) return;
-  const ctx = cv.getContext('2d');
-  const S = 180, half = CFG.cityHalf;
-  const toPx = (v) => ((v + half) / (half * 2)) * S;
-  ctx.fillStyle = '#1a2230';
-  ctx.fillRect(0, 0, S, S);
-  ctx.fillStyle = '#2f6fb4';
-  ctx.fillRect(0, 0, toPx(-270), S);
-  ctx.strokeStyle = '#5a6270';
-  ctx.lineWidth = 3;
-  for (const v of roadCoords()) {
-    ctx.beginPath(); ctx.moveTo(toPx(v), 0); ctx.lineTo(toPx(v), S); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, toPx(v)); ctx.lineTo(S, toPx(v)); ctx.stroke();
+function drawMinimap(G) {
+  const cv = G.hud.minimap;
+  const g = cv.getContext('2d');
+  const S = 180, HALF = 300;
+  const toMap = (x, z) => [(x + HALF) / (HALF * 2) * S, (z + HALF) / (HALF * 2) * S];
+  g.fillStyle = '#0e1a24'; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#1f6f9f'; g.fillRect(0, 0, 8, S); // sea strip
+  g.strokeStyle = '#4a5568'; g.lineWidth = 2;
+  for (let c = -240; c <= 240; c += 60) {
+    const [ax] = toMap(c, 0); const [, bz] = toMap(0, c);
+    g.beginPath(); g.moveTo(ax, 0); g.lineTo(ax, S); g.stroke();
+    g.beginPath(); g.moveTo(0, bz); g.lineTo(S, bz); g.stroke();
   }
-  // Shops: garage green, respray + guns purple.
-  ctx.fillStyle = '#4ad87a';
-  ctx.fillRect(toPx(-60) - 3, toPx(-60) - 3, 6, 6);
-  ctx.fillStyle = '#b46ad8';
-  ctx.fillRect(toPx(120) - 3, toPx(60) - 3, 6, 6);
-  ctx.fillRect(toPx(180) - 3, toPx(-60) - 3, 6, 6);
-  // Mission marker (yellow).
-  if (G.missions.marker.visible) {
-    ctx.fillStyle = '#ffd24a';
-    const mx = toPx(G.missions.markerPos.x), mz = toPx(G.missions.markerPos.z);
-    ctx.beginPath(); ctx.arc(mx, mz, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(mx, mz, 8 + Math.sin(G.elapsed * 4) * 2, 0, Math.PI * 2); ctx.stroke();
+  // Garage + shops.
+  g.fillStyle = '#3ddc5f';
+  const [gx, gz] = toMap(SHOP_POS.garage[0], SHOP_POS.garage[1]);
+  g.fillRect(gx - 3, gz - 3, 6, 6);
+  g.fillStyle = '#c98aff';
+  const [sx, sz] = toMap(SHOP_POS.guns[0], SHOP_POS.guns[1]);
+  g.fillRect(sx - 3, sz - 3, 6, 6);
+  // Mission marker.
+  if (G.mission.marker) {
+    const [mx, mz] = toMap(G.mission.marker.x, G.mission.marker.z);
+    g.fillStyle = '#ffd23f';
+    g.beginPath(); g.arc(mx, mz, 5 + Math.sin(G.time * 5) * 1.5, 0, Math.PI * 2); g.fill();
   }
-  // Police (red/blue flashing).
-  const flash = Math.sin(G.elapsed * 8) > 0;
-  ctx.fillStyle = flash ? '#ff4444' : '#4488ff';
-  for (const car of G.policeCars || []) {
-    ctx.fillRect(toPx(car.mesh.position.x) - 2, toPx(car.mesh.position.z) - 2, 4, 4);
+  // Police (blinking red/blue).
+  g.fillStyle = Math.sin(G.time * 8) > 0 ? '#ff4444' : '#4488ff';
+  for (const pc of G.policeCars) {
+    const [px, pz] = toMap(pc.x, pc.z);
+    g.beginPath(); g.arc(px, pz, 3, 0, Math.PI * 2); g.fill();
   }
-  for (const cop of G.footPolice || []) {
-    ctx.fillRect(toPx(cop.mesh.position.x) - 2, toPx(cop.mesh.position.z) - 2, 4, 4);
-  }
-  // Player arrow (white).
+  // Player arrow (white, rotated by yaw).
+  const p = G.player.pos;
+  const [px, pz] = toMap(p.x, p.z);
+  g.save(); g.translate(px, pz); g.rotate(-G.player.yaw);
+  g.fillStyle = '#ffffff';
+  g.beginPath(); g.moveTo(0, -6); g.lineTo(4, 5); g.lineTo(-4, 5); g.closePath(); g.fill();
+  g.restore();
+}
+
+export function showTitle(G, hasSave) {
+  G.hud.title.style.display = 'flex';
+  G.hud.pause.style.display = 'none';
+  G.hud.gameover.style.display = 'none';
+  G.hud.el.classList.remove('on');
+  document.getElementById('btn-continue').style.display = hasSave ? '' : 'none';
+}
+export function showPause(G, on) {
+  G.hud.pause.style.display = on ? 'flex' : 'none';
+}
+export function showGameOver(G, title, sub) {
+  document.getElementById('over-title').textContent = title;
+  document.getElementById('over-sub').textContent = sub;
+  G.hud.gameover.style.display = 'flex';
+  G.hud.el.classList.remove('on');
+}
+
+const SAVE_KEY = 'solarabay-save-v1';
+export function saveGameData(G) {
   const p = G.player;
-  const pos = p.car ? p.car.mesh.position : p.pos;
-  const yaw = p.car ? p.car.yaw : p.yaw;
-  ctx.save();
-  ctx.translate(toPx(pos.x), toPx(pos.z));
-  ctx.rotate(-yaw + Math.PI);
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.moveTo(0, -6); ctx.lineTo(4, 5); ctx.lineTo(-4, 5); ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  const data = {
+    cash: p.cash, mission: G.mission.index, health: p.health, armor: p.armor,
+    hasPistol: p.hasPistol, ammo: p.ammo, coins: G.stats.coins, carsStolen: G.stats.carsStolen,
+    maxWanted: G.stats.maxWanted, playTime: G.stats.playTime,
+    garage: G.cars.filter((c) => c.driver === 'player' || c.driver === 'parked').slice(0, 3).map((c) => ({ type: c.type, x: c.x, z: c.z })),
+  };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch { /* private mode */ }
+  return data;
+}
+export function loadGameData() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+export function missionName(G) {
+  return MISSIONS[G.mission.index] ? MISSIONS[G.mission.index].name : 'Free Roam';
 }

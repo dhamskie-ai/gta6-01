@@ -1,110 +1,103 @@
-// Ro Mendez on foot: movement, jump, camera, enter/exit cars.
+// Ro Mendez on foot + third-person chase camera.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { collideBuildings, clampToCity } from './city.js';
-import { makePedModel } from './traffic.js';
-import { nearestCar, stealCar, exitCar } from './vehicles.js';
+import { CONFIG } from './config.js';
+import { collideBuildings } from './city.js';
 
-export function createPlayer(G) {
-  const mesh = makePedModel(G.rng);
-  // Ro: red jacket, dark jeans.
-  mesh.children[0].material = new THREE.MeshLambertMaterial({ color: 0xc82828 });
-  mesh.position.set(0, 0, 20);
-  G.scene.add(mesh);
-  G.player.mesh = mesh;
-  G.player.pos = mesh.position;
-  G.player.yaw = Math.PI;
-  G.player.camYaw = Math.PI;
-  G.player.camPitch = 0.25;
-  G.player.camDist = 8;
-  G.player.vy = 0;
-  G.player.grounded = true;
-  G.player.onFoot = true;
+export function createPlayerMesh(G) {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6f8e });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd8a077 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.32), jacket);
+  body.position.y = 1.1; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), skin);
+  head.position.y = 1.7; head.castShadow = true; g.add(head);
+  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
+  hair.position.y = 1.9; g.add(hair);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.22), pants);
+  legL.position.set(-0.15, 0.38, 0); g.add(legL);
+  const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.17), jacket);
+  armL.position.set(-0.37, 1.1, 0); g.add(armL);
+  const armR = armL.clone(); armR.position.x = 0.37; g.add(armR);
+  // Pistol in the right hand when armed.
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.42), new THREE.MeshLambertMaterial({ color: 0x14161a }));
+  gun.position.set(0.37, 0.82, 0.22); gun.name = 'gun'; gun.visible = false; g.add(gun);
+  g.position.copy(G.player.pos);
+  G.scene.add(g);
+  G.playerMesh = g;
+  G.playerParts = { legL, legR, armL, armR, gun };
+  return g;
 }
 
 export function updatePlayerOnFoot(G, dt) {
   const p = G.player;
   const input = G.input;
+  const { dx, dy } = input.consumeMouse();
+  G.camYaw -= dx * 0.0032;
+  G.camPitch = Math.max(-0.4, Math.min(0.7, G.camPitch + dy * 0.0022));
+  if (input.wheel) G.camDist = Math.max(4, Math.min(12, G.camDist + input.wheel * 0.01));
+  if (input.wasPressed('KeyC')) G.camDist = G.camDist > 7 ? 5 : 9;
+
   const run = input.down('ShiftLeft') || input.down('ShiftRight');
-  const speed = run ? CFG.runSpeed : CFG.walkSpeed;
-  const ax = input.axis();
-  const sin = Math.sin(p.camYaw), cos = Math.cos(p.camYaw);
+  const speed = run ? CONFIG.runSpeed : CONFIG.walkSpeed;
   let mx = 0, mz = 0;
-  if (ax.z !== 0) { mx += -sin * -ax.z; mz += -cos * -ax.z; }
-  if (ax.x !== 0) { mx += cos * ax.x; mz += -sin * ax.x; }
-  const len = Math.hypot(mx, mz);
-  if (len > 0.01) {
-    mx /= len; mz /= len;
-    p.pos.x += mx * speed * dt;
-    p.pos.z += mz * speed * dt;
-    p.yaw = Math.atan2(-mx, -mz);
-    p.walkPhase = (p.walkPhase || 0) + dt * speed * 1.6;
+  if (input.down('KeyW') || input.down('ArrowUp')) mz += 1;
+  if (input.down('KeyS') || input.down('ArrowDown')) mz -= 1;
+  if (input.down('KeyA') || input.down('ArrowLeft')) mx -= 1;
+  if (input.down('KeyD') || input.down('ArrowRight')) mx += 1;
+  const moving = mx !== 0 || mz !== 0;
+  if (moving) {
+    const len = Math.hypot(mx, mz); mx /= len; mz /= len;
+    const sy = Math.sin(G.camYaw), cy = Math.cos(G.camYaw);
+    const wx = (mx * cy + mz * sy) * speed * dt;
+    const wz = (-mx * sy + mz * cy) * speed * dt;
+    const res = collideBuildings(G, p.pos.x + wx, p.pos.z + wz, 0.6);
+    p.pos.x = res.x; p.pos.z = res.z;
+    p.yaw = Math.atan2(wx, wz);
+    p.walkPhase += dt * (run ? 13 : 9);
   }
   // Jump + gravity.
-  if (input.pressed('Space') && p.grounded) {
-    p.vy = CFG.jumpSpeed;
-    p.grounded = false;
-  }
-  if (!p.grounded) {
-    p.vy -= CFG.gravity * dt;
-    p.pos.y += p.vy * dt;
-    if (p.pos.y <= 0) { p.pos.y = 0; p.vy = 0; p.grounded = true; }
-  }
-  clampToCity(p.pos, 2);
-  collideBuildings(G, p.pos, 0.6);
-  // Walk swing.
-  const swing = len > 0.01 ? Math.sin(p.walkPhase || 0) * 0.55 : 0;
-  p.mesh.userData.legL.rotation.x = swing;
-  p.mesh.userData.legR.rotation.x = -swing;
-  p.mesh.userData.armL.rotation.x = -swing * 0.7;
-  p.mesh.userData.armR.rotation.x = swing * 0.7;
-  p.mesh.rotation.y = p.yaw;
-  // Steal / enter a car with E.
-  if (input.pressed('KeyE')) {
-    const car = nearestCar(G, p.pos, 5);
-    if (car) {
-      stealCar(G, car);
-      G.hud.setPrompt('');
-    } else {
-      const npc = nearestTalkNpc(G, p.pos, 4);
-      if (npc) G.missions.talkToNpc(G, npc);
+  if (input.wasPressed('Space') && p.pos.y <= 0.01) p.vy = CONFIG.jumpSpeed;
+  p.vy -= CONFIG.gravity * dt;
+  p.pos.y += p.vy * dt;
+  if (p.pos.y < 0) { p.pos.y = 0; p.vy = 0; }
+  const parts = G.playerParts;
+  const swing = moving ? Math.sin(p.walkPhase) * 0.55 : 0;
+  parts.legL.rotation.x = swing; parts.legR.rotation.x = -swing;
+  parts.armL.rotation.x = -swing * 0.7; parts.armR.rotation.x = swing * 0.7;
+  parts.gun.visible = p.weapon === 1;
+  G.playerMesh.position.copy(p.pos);
+  G.playerMesh.rotation.y = p.yaw;
+  G.audio.setEngine(0, false);
+}
+
+// Chase camera: behind the player (or car), smoothed, mouse orbit.
+export function updateCamera(G, dt) {
+  const p = G.player;
+  const input = G.input;
+  if (G.playerCar) {
+    const { dx, dy } = input.consumeMouse();
+    G.camYaw -= dx * 0.0032;
+    G.camPitch = Math.max(-0.2, Math.min(0.6, G.camPitch + dy * 0.0022));
+    if (input.wheel) G.camDist = Math.max(6, Math.min(16, G.camDist + input.wheel * 0.01));
+    if (input.wasPressed('KeyC')) G.camDist = G.camDist > 10 ? 7 : 13;
+    // Auto-align behind the car when driving without mouse input.
+    if (Math.abs(dx) < 0.5 && Math.abs(G.playerCar.speed) > 3) {
+      let target = G.playerCar.yaw + Math.PI;
+      let diff = target - G.camYaw;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      G.camYaw += diff * Math.min(1, dt * 1.2);
     }
   }
-}
-
-export function nearestTalkNpc(G, pos, maxDist) {
-  for (const npc of G.talkNpcs || []) {
-    const dx = npc.mesh.position.x - pos.x;
-    const dz = npc.mesh.position.z - pos.z;
-    if (Math.hypot(dx, dz) < maxDist) return npc;
-  }
-  return null;
-}
-
-// Third-person chase camera: mouse orbits, wheel zooms, C toggles distance.
-export function updateCamera(G, dt) {
-  const input = G.input;
-  const p = G.player;
-  p.camYaw -= input.mouseDX * 0.0032;
-  p.camPitch = THREE.MathUtils.clamp(p.camPitch + input.mouseDY * 0.0022, -0.1, 1.1);
-  if (input.wheel !== 0) p.camDist = THREE.MathUtils.clamp(p.camDist + input.wheel * 0.01, 5, 14);
-  if (input.pressed('KeyC')) p.camDist = p.camDist < 10 ? 13 : 7;
-  const anchor = p.car ? p.car.mesh.position : p.pos;
-  const ay = p.car ? 1.6 : 1.9;
-  const dist = p.camDist;
-  const cx = anchor.x + Math.sin(p.camYaw) * Math.cos(p.camPitch) * dist;
-  const cz = anchor.z + Math.cos(p.camYaw) * Math.cos(p.camPitch) * dist;
-  const cy = anchor.y + ay + Math.sin(p.camPitch) * dist;
-  const cam = G.camera;
-  cam.position.set(cx, cy, cz);
-  cam.lookAt(anchor.x, anchor.y + ay * 0.6, anchor.z);
-  // Keep the camera out of buildings (simple: raise it).
-  if (cam.position.y < 1.2) cam.position.y = 1.2;
-}
-
-export function exitVehicleKey(G) {
-  if (G.player.car && G.input.pressed('KeyE')) {
-    exitCar(G);
-    G.audio?.blip(330, 0.08, 'sine', 0.1);
-  }
+  const dist = G.playerCar ? G.camDist + 4 : G.camDist;
+  const height = 2.6 + G.camPitch * 6 + (G.playerCar ? 1.6 : 0);
+  const cx = p.pos.x + Math.sin(G.camYaw) * dist;
+  const cz = p.pos.z + Math.cos(G.camYaw) * dist;
+  const tx = p.pos.x, tz = p.pos.z, ty = p.pos.y + 1.6;
+  G.camera.position.x += (cx - G.camera.position.x) * Math.min(1, dt * 8);
+  G.camera.position.y += (height - G.camera.position.y) * Math.min(1, dt * 8);
+  G.camera.position.z += (cz - G.camera.position.z) * Math.min(1, dt * 8);
+  G.camera.lookAt(tx, ty, tz);
 }

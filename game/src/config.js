@@ -1,46 +1,72 @@
-// SOLARA BAY — tuning constants. One place for speeds, prices, wanted rules.
-export const CFG = {
-  cityHalf: 300,
-  roadGap: 60,
-  roadWidth: 12,
-  walkSpeed: 6,
-  runSpeed: 10.5,
-  jumpSpeed: 8,
-  gravity: 22,
-  dayLengthSec: 480,
-  startHour: 10,
-  resprayPerStar: 100,
-  pistolPrice: 250,
-  armorPrice: 150,
-  maxHealth: 100,
-  maxArmor: 100,
+// SOLARA BAY tuning: speeds, prices, wanted rules, clock, city size.
+export const CONFIG = {
+  cityHalf: 300, streetStep: 60, streetMin: -240, streetMax: 240, roadHalf: 5,
+  walkSpeed: 4.2, runSpeed: 7.5, jumpSpeed: 7.5, gravity: 20,
+  carAccel: 16, carBrake: 30, carReverseMax: 12, carDrag: 0.6,
+  trafficCount: 14, pedCount: 24, parkedCount: 12,
+  wantedDecayHidden: 10, wantedClearHidden: 20, resprayPerStar: 100,
+  pistolPrice: 250, armorPrice: 150, taxiFare: 60, jumpReward: 80, coinValue: 25,
+  dayLength: 480, // seconds per full 24h cycle
   maxWanted: 5,
-  heatHideSec: 10,
-  heatClearSec: 20,
-  trafficCount: 14,
-  pedCount: 24,
-  sunCoinCount: 30,
-  garageSlots: 3,
-  saveKey: 'solarabay-save-v1',
-  carTypes: {
-    sedan: { name: 'Cometa', color: 0x3a6fd8, top: 34, accel: 15, grip: 2.6, hp: 100, len: 4.4 },
-    hatch: { name: 'Pip', color: 0xe8b13c, top: 28, accel: 13, grip: 2.9, hp: 80, len: 3.6 },
-    taxi: { name: 'Cabro', color: 0xf2c200, top: 30, accel: 14, grip: 2.6, hp: 90, len: 4.4 },
-    van: { name: 'Mula', color: 0x7a7f85, top: 25, accel: 10, grip: 2.2, hp: 140, len: 5.0 },
-    sport: { name: 'Veloce GT', color: 0xd82828, top: 47, accel: 21, grip: 3.3, hp: 90, len: 4.2 },
-    truck: { name: 'Hauler', color: 0x2e7d4f, top: 22, accel: 8, grip: 2.0, hp: 170, len: 6.0 },
-  },
-  districts: [
-    { name: 'Marina Bay', x0: -300, z0: -300, x1: -120, z1: 300, minH: 6, maxH: 16, tint: 0xead9b0 },
-    { name: 'Old Solara', x0: -120, z0: -120, x1: 60, z1: 120, minH: 8, maxH: 20, tint: 0xe8a56b },
-    { name: 'The Spires', x0: 60, z0: -180, x1: 240, z1: 60, minH: 30, maxH: 70, tint: 0x9fc4d8 },
-    { name: 'The Docks', x0: 60, z0: 60, x1: 300, z1: 300, minH: 8, maxH: 18, tint: 0x8f9aa3 },
-    { name: 'Vista Hills', x0: -120, z0: -300, x1: 300, z1: -180, minH: 10, maxH: 26, tint: 0xc9d6a8 },
-    { name: 'Calle Verde', x0: -300, z0: 120, x1: -120, z1: 300, minH: 6, maxH: 14, tint: 0xa8d6a0 },
-  ],
 };
 
+export const CAR_MODELS = {
+  sedan:   { name: 'Cometa',    top: 34, accel: 1.0, grip: 1.0, color: 0x3f6fb5, len: 4.4, wid: 1.9 },
+  hatch:   { name: 'Pip',       top: 30, accel: 0.95, grip: 1.1, color: 0xd94f3d, len: 3.8, wid: 1.8 },
+  taxi:    { name: 'Cabro',     top: 32, accel: 1.0, grip: 1.0, color: 0xf2c200, len: 4.4, wid: 1.9 },
+  van:     { name: 'Mula',      top: 26, accel: 0.8, grip: 0.9, color: 0x7a7f85, len: 5.0, wid: 2.1 },
+  sport:   { name: 'Veloce GT', top: 46, accel: 1.35, grip: 1.25, color: 0xc22030, len: 4.5, wid: 2.0 },
+  truck:   { name: 'Hauler',    top: 24, accel: 0.7, grip: 0.85, color: 0x2e7d5b, len: 6.2, wid: 2.3 },
+};
+
+export const DISTRICTS = [
+  { name: 'Marina Bay',  test: (x, z) => x < -180, style: 'marina' },
+  { name: 'The Docks',   test: (x, z) => x > 180, style: 'docks' },
+  { name: 'Vista Hills', test: (x, z) => z < -180, style: 'hills' },
+  { name: 'The Spires',  test: (x, z) => Math.abs(x) <= 120 && Math.abs(z) <= 120, style: 'spires' },
+  { name: 'Old Solara',  test: (x, z) => z > 60 && Math.abs(x) <= 180, style: 'oldsolara' },
+  { name: 'Calle Verde', test: () => true, style: 'verde' },
+];
+
 export function districtAt(x, z) {
-  for (const d of CFG.districts) if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d;
-  return CFG.districts[1];
+  for (const d of DISTRICTS) if (d.test(x, z)) return d;
+  return DISTRICTS[DISTRICTS.length - 1];
 }
+
+export const MISSIONS = [
+  { id: 1, name: 'First Gear', reward: 150, briefing: 'Sal Vega: Ro, you owe me. Start simple — steal that parked Cometa and bring it to Mara at the garage. Keep it clean.',
+    steps: [
+      { text: 'Steal the parked car (press E near it)', kind: 'steal', pos: [2.5, 36] },
+      { text: 'Drive to Mara\'s Garage', kind: 'goto', pos: [-60, -30], radius: 10 },
+    ] },
+  { id: 2, name: 'Courier Run', reward: 250, time: 240, briefing: 'Kip: Three parcels, four minutes. Sal\'s clients don\'t wait. Don\'t smash the goods.',
+    steps: [
+      { text: 'Deliver parcel 1 — Calle Verde', kind: 'goto', pos: [-150, 120], radius: 9 },
+      { text: 'Deliver parcel 2 — The Docks', kind: 'goto', pos: [210, 0], radius: 9 },
+      { text: 'Deliver parcel 3 — Vista Hills', kind: 'goto', pos: [90, -180], radius: 9 },
+    ] },
+  { id: 3, name: 'The Docks Job', reward: 400, briefing: 'Sal Vega: Kane\'s crew guards a Hauler full of his imports at the Docks. Take it. Expect trouble.',
+    steps: [
+      { text: 'Reach the Docks yard', kind: 'goto', pos: [210, 90], radius: 12 },
+      { text: 'Deal with the 4 guards', kind: 'clear', pos: [210, 90], count: 4 },
+      { text: 'Steal the Hauler and drive it to the garage', kind: 'stealTruck', pos: [222, 96] },
+      { text: 'Deliver the Hauler to Mara\'s Garage', kind: 'goto', pos: [-60, -30], radius: 10 },
+    ] },
+  { id: 4, name: 'Neon Nights', reward: 500, briefing: 'Kip: Kane\'s courier leaves the Marina at night. Tail him — stay back, don\'t spook him. When he runs, chase him down.',
+    steps: [
+      { text: 'Wait for the courier near the pier (night)', kind: 'wait', pos: [-240, 30], radius: 14 },
+      { text: 'Tail the courier — stay within 40 m, don\'t get closer than 12 m', kind: 'tail', pos: [-180, 60], radius: 40 },
+      { text: 'Chase the courier down — ram his car to stop it', kind: 'chase', pos: [-120, 120], radius: 30 },
+    ] },
+  { id: 5, name: 'Bay Heist', reward: 1000, briefing: 'Sal Vega: The finale, Ro. Kane\'s show car — a Veloce GT Aurelia — sits in the Spires penthouse garage. Take it to the pier. This ends the debt.',
+    steps: [
+      { text: 'Reach the Spires penthouse garage', kind: 'goto', pos: [30, 0], radius: 10 },
+      { text: 'Steal the Veloce GT Aurelia', kind: 'steal', pos: [36, 0] },
+      { text: 'Escape the 4-star chase to the Marina pier', kind: 'escape', pos: [-240, 0], radius: 14 },
+    ] },
+];
+
+export const TAXI_SPOTS = [[-150, 120], [150, -120], [30, 120], [-150, -60], [90, 60]];
+export const JUMP_RAMPS = [[-60, 0], [120, 60], [0, -180]];
+export const SHOP_POS = { guns: [60, 120], spray: [-60, 30], garage: [-60, -30] };
+export const PED_NAMES = ['Ana', 'Beto', 'Cleo', 'Dario', 'Elsa', 'Finn', 'Gia', 'Hugo', 'Ines', 'Joel', 'Lena', 'Marco', 'Nia', 'Omar', 'Pia', 'Rosa', 'Tomas', 'Uma', 'Vic', 'Wren'];

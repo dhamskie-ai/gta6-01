@@ -1,235 +1,164 @@
-// Combat: fists + pistol, enemy guards, health/armor, pickups.
+// Combat: fists + pistol, enemy guards, health/armor, tracers, pickups.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { makePedModel, scarePedestrians } from './traffic.js';
-import { spawnParticles } from './render.js';
-import { damagePlayer } from './police.js';
-import { addWanted } from './vehicles.js';
+import { removePed } from './traffic.js';
 
 export function createCombat(G) {
   G.enemies = [];
-  G.bullets = [];
-  G.player.weapon = 'fists';
-  G.player.ammo = 0;
-  G.player.pistolOwned = false;
-  G.player.punchCooldown = 0;
-  G.player.shootCooldown = 0;
+  G.tracers = [];
+  G.pickups = [];
+  const geo = new THREE.BoxGeometry(0.08, 0.08, 1);
+  G.tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe14a });
+  G.tracerGeo = geo;
 }
 
-export function spawnGuard(G, x, z, hp = 50) {
-  const mesh = makePedModel(G.rng);
-  mesh.children[0].material = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
-  mesh.position.set(x, 0, z);
-  G.scene.add(mesh);
-  const guard = { mesh, hp, maxHp: hp, shootCooldown: G.rng.range(1, 2.5), walkPhase: 0 };
-  G.enemies.push(guard);
-  return guard;
+export function spawnGuard(G, x, z) {
+  const ped = G.spawnPed(x, z);
+  ped.state = 'guard'; ped.hp = 60; ped.speed = 3.0; ped.shootT = 0; ped.accuracy = 0.25;
+  // Dark crew colours via instance colours.
+  G.pedMeshes.body.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
+  G.pedMeshes.armL.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
+  G.pedMeshes.armR.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
+  G.pedMeshes.body.instanceColor.needsUpdate = true;
+  G.pedMeshes.armL.instanceColor.needsUpdate = true;
+  G.pedMeshes.armR.instanceColor.needsUpdate = true;
+  G.enemies.push(ped);
+  return ped;
 }
 
-export function removeGuard(G, guard) {
-  const i = G.enemies.indexOf(guard);
-  if (i >= 0) G.enemies.splice(i, 1);
-  G.scene.remove(guard.mesh);
+export function spawnPickup(G, kind, x, z) {
+  const color = kind === 'health' ? 0x3ddc5f : 0x4aa8ff;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7),
+    new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.5 }));
+  m.position.set(x, 0.8, z);
+  G.scene.add(m);
+  G.pickups.push({ mesh: m, kind, x, z });
 }
 
-export function updateCombat(G, dt) {
+function fireTracer(G, from, to) {
+  const m = new THREE.Mesh(G.tracerGeo, G.tracerMat);
+  const mid = from.clone().add(to).multiplyScalar(0.5);
+  m.position.copy(mid);
+  m.lookAt(to);
+  m.scale.set(1, 1, from.distanceTo(to));
+  G.scene.add(m);
+  G.tracers.push({ mesh: m, life: 0.08 });
+}
+
+export function playerShoot(G) {
   const p = G.player;
-  p.punchCooldown -= dt;
-  p.shootCooldown -= dt;
-  // Weapon switching.
-  if (G.input.pressed('Digit1')) { p.weapon = 'fists'; G.hud.setToast('Senjata: Tinju'); }
-  if (G.input.pressed('Digit2') && p.pistolOwned) { p.weapon = 'pistol'; G.hud.setToast('Senjata: Pistol'); }
-  if (G.input.pressed('KeyR') && p.weapon === 'pistol') {
-    p.ammo = 12;
-    G.audio?.blip(500, 0.08, 'square', 0.1);
-    G.hud.setToast('Pistol diisi ulang');
-  }
-  // Fire / punch on click.
-  if (G.input.mouseClicked && G.phase === 'play') {
-    if (p.weapon === 'pistol' && p.pistolOwned) shootPistol(G);
-    else if (p.weapon === 'fists') punchAttack(G);
-  }
-  updateEnemies(G, dt);
-  updateBullets(G, dt);
-}
-
-function aimPoint(G) {
-  // Where the camera looks: forward from the player at eye height.
-  const p = G.player;
-  const dir = new THREE.Vector3();
-  G.camera.getWorldDirection(dir);
-  const origin = p.car ? p.car.mesh.position.clone().setY(1.6) : p.pos.clone().setY(1.6);
-  return { origin, dir };
-}
-
-function shootPistol(G) {
-  const p = G.player;
-  if (p.shootCooldown > 0) return;
-  if (p.ammo <= 0) {
-    G.audio?.blip(200, 0.1, 'square', 0.1);
-    G.hud.setToast('Peluru habis — tekan R');
+  if (p.weapon === 0) {
+    // Punch: hit the nearest enemy/police within 2.2 m.
+    G.audio.punch();
+    const target = nearestFoe(G, 2.4);
+    if (target) damageFoe(G, target, 25);
     return;
   }
-  p.shootCooldown = 0.28;
-  p.ammo -= 1;
-  G.audio?.gunshot();
-  const { origin, dir } = aimPoint(G);
-  // Muzzle flash + tracer.
-  spawnParticles(G, origin.clone().add(dir.clone().multiplyScalar(1.2)), 0xffd24a, 5, 1, 1, 0.15);
-  const hit = findShotHit(G, origin, dir, 60);
-  if (hit) {
-    damageEnemy(G, hit.enemy, 34, hit.point);
+  if (p.ammo <= 0) { G.audio.tone(180, 0.1, 'square', 0.15); return; }
+  p.ammo--;
+  G.audio.shot();
+  G.lastShotT = G.time;
+  G.muzzleT = 0.06;
+  addWantedOnce(G);
+  const dir = new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
+  // Camera-aimed: shoot toward where the camera looks on foot.
+  const from = p.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
+  const to = from.clone().add(dir.clone().multiplyScalar(60));
+  fireTracer(G, from, to);
+  // Hit the first foe near the shot line.
+  let best = null, bd = 3;
+  for (const foe of [...G.enemies, ...G.footPolice]) {
+    const fx = foe.x - from.x, fz = foe.z - from.z;
+    const along = fx * dir.x + fz * dir.z;
+    if (along < 0 || along > 60) continue;
+    const perp = Math.abs(fx * dir.z - fz * dir.x);
+    if (perp < bd) { bd = perp; best = foe; }
   }
-  scarePedestrians(G, p.pos, 30);
-  addWanted(G, 1, 'Menembak di kota');
+  if (best) damageFoe(G, best, 34);
 }
 
-function findShotHit(G, origin, dir, maxDist) {
-  let best = null, bestD = maxDist;
-  const targets = [
-    ...G.enemies.map((e) => ({ mesh: e.mesh, ref: e, kind: 'guard' })),
-    ...G.footPolice.map((c) => ({ mesh: c.mesh, ref: c, kind: 'cop' })),
-  ];
-  for (const t of targets) {
-    const pos = t.mesh.position;
-    const to = new THREE.Vector3(pos.x - origin.x, 1.2 - origin.y, pos.z - origin.z);
-    const along = to.dot(dir);
-    if (along < 0 || along > bestD) continue;
-    const closest = origin.clone().add(dir.clone().multiplyScalar(along));
-    const perp = Math.hypot(closest.x - pos.x, closest.z - pos.z);
-    if (perp < 1.6) { bestD = along; best = { enemy: t, point: closest }; }
+let wantedGiven = false;
+function addWantedOnce(G) {
+  if (!wantedGiven) { wantedGiven = true; G.addWanted(1, 'fired a weapon'); }
+  setTimeout(() => { wantedGiven = false; }, 8000);
+}
+
+function nearestFoe(G, range) {
+  const p = G.player.pos;
+  let best = null, bd = range;
+  for (const foe of [...G.enemies, ...G.footPolice]) {
+    const d = Math.hypot(foe.x - p.x, foe.z - p.z);
+    if (d < bd) { bd = d; best = foe; }
   }
   return best;
 }
 
-function damageEnemy(G, target, dmg, point) {
-  const ref = target.ref;
-  ref.hp -= dmg;
-  spawnParticles(G, point, 0xff4444, 6, 2, 2, 0.5);
-  if (ref.hp > 0) return;
-  if (target.kind === 'cop') {
-    const i = G.footPolice.indexOf(ref);
-    if (i >= 0) G.footPolice.splice(i, 1);
-    G.scene.remove(ref.mesh);
-    addWanted(G, 2, 'Menembak polisi');
-    G.missions.onGuardDown?.(G);
-  } else {
-    spawnParticles(G, ref.mesh.position.clone().setY(1), 0xff4444, 14, 3, 3, 0.8);
-    removeGuard(G, ref);
-    G.missions.onGuardDown?.(G);
+export function damageFoe(G, foe, dmg) {
+  foe.hp = (foe.hp ?? 50) - dmg;
+  G.effects.burst(foe.x, 1.4, foe.z, 0xff5555, 8);
+  if (foe.hp <= 0) {
+    removePed(G, foe);
+    G.enemies.splice(G.enemies.indexOf(foe), 1);
+    G.footPolice.splice(G.footPolice.indexOf(foe), 1);
+    G.missionFoesLeft = Math.max(0, (G.missionFoesLeft || 0) - 1);
+    G.audio.noise(0.2, 0.3, 300);
   }
 }
 
-function punchAttack(G) {
+export function damagePlayer(G, dmg) {
   const p = G.player;
-  if (p.punchCooldown > 0) return;
-  p.punchCooldown = 0.45;
-  G.audio?.punch();
-  const range = 2.2;
-  const targets = [
-    ...G.enemies.map((e) => ({ mesh: e.mesh, ref: e, kind: 'guard' })),
-    ...G.footPolice.map((c) => ({ mesh: c.mesh, ref: c, kind: 'cop' })),
-  ];
-  for (const t of targets) {
-    const d = t.mesh.position.distanceTo(p.pos);
-    if (d < range) {
-      damageEnemy(G, t, 18, t.mesh.position.clone().setY(1.2));
-      break;
+  if (p.armor > 0) { const absorbed = Math.min(p.armor, dmg); p.armor -= absorbed; dmg -= absorbed; }
+  p.health -= dmg;
+  G.hud.flashDamage();
+  if (p.health <= 0) { p.health = 0; G.wasted(); }
+}
+
+export function updateCombat(G, dt) {
+  const p = G.player;
+  // Weapon switching + reload.
+  if (G.input.wasPressed('Digit1')) { p.weapon = 0; G.audio.pickup(); }
+  if (G.input.wasPressed('Digit2') && p.hasPistol) { p.weapon = 1; G.audio.pickup(); }
+  if (G.input.wasPressed('KeyR') && p.weapon === 1) {
+    if (p.cash >= 20) { p.cash -= 20; p.ammo = 12; G.hud.toast('Ammo refilled — $20'); }
+    else { p.ammo = 6; G.hud.toast('Ammo refilled (6) — broke, huh'); }
+  }
+  if (G.input.mouseClicked && G.phase === 'play') playerShoot(G);
+  // Enemy AI: chase, shoot with limited accuracy, or punch up close.
+  for (const foe of [...G.enemies]) {
+    const dx = p.pos.x - foe.x, dz = p.pos.z - foe.z;
+    const d = Math.hypot(dx, dz) || 1;
+    foe.yaw = Math.atan2(dx, dz);
+    foe.shootT -= dt;
+    if (d > 2.2) {
+      foe.x += (dx / d) * foe.speed * dt; foe.z += (dz / d) * foe.speed * dt;
+    } else if (foe.shootT <= 0) {
+      foe.shootT = 1.1; damagePlayer(G, 8); G.audio.punch();
     }
-  }
-}
-
-function updateEnemies(G, dt) {
-  const p = G.player;
-  const playerPos = p.car ? p.car.mesh.position : p.pos;
-  for (const guard of [...G.enemies]) {
-    const gp = guard.mesh.position;
-    const dx = playerPos.x - gp.x, dz = playerPos.z - gp.z;
-    const dist = Math.hypot(dx, dz);
-    guard.mesh.rotation.y = Math.atan2(-dx, -dz);
-    guard.shootCooldown -= dt;
-    if (dist > 24) {
-      // Walk toward the player.
-      gp.x += -Math.sin(guard.mesh.rotation.y) * 2.5 * dt;
-      gp.z += -Math.cos(guard.mesh.rotation.y) * 2.5 * dt;
-      guard.walkPhase += dt * 6;
-      const swing = Math.sin(guard.walkPhase) * 0.5;
-      guard.mesh.userData.legL.rotation.x = swing;
-      guard.mesh.userData.legR.rotation.x = -swing;
-    } else if (guard.shootCooldown <= 0 && dist < 30) {
-      guard.shootCooldown = 1.4 + G.rng.next();
-      G.audio?.gunshot();
-      spawnParticles(G, gp.clone().setY(1.5), 0xffd24a, 4, 1, 1, 0.15);
-      // Limited accuracy.
-      if (G.rng.chance(0.35)) {
-        if (p.car) { p.car.hp -= 5; }
-        else damagePlayer(G, 7);
-        spawnParticles(G, playerPos.clone().setY(1.2), 0xff4444, 4, 2, 2, 0.4);
-      }
+    if (d < 26 && d > 2.2 && foe.shootT <= 0) {
+      foe.shootT = 1.4;
+      const from = new THREE.Vector3(foe.x, 1.4, foe.z);
+      const to = p.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
+      fireTracer(G, from, to);
+      G.audio.shot();
+      if (G.rng.chance(foe.accuracy)) damagePlayer(G, 7);
     }
+    // Position/animation are written by updatePeds from x/z/yaw.
   }
-}
-
-function updateBullets(G, dt) {
-  // Tracers are particle-based; nothing persistent to update.
-}
-
-// Pickups: health, armor, sun coins.
-export function spawnPickups(G) {
-  G.pickups = [];
-  const hpMat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x882222 });
-  const arMat = new THREE.MeshLambertMaterial({ color: 0x4a8ad8, emissive: 0x113366 });
-  const spots = [
-    { x: 30, z: -30, kind: 'health' }, { x: -90, z: 90, kind: 'health' },
-    { x: 150, z: 150, kind: 'armor' }, { x: -180, z: -90, kind: 'armor' },
-    { x: 90, z: -150, kind: 'health' },
-  ];
-  for (const s of spots) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), s.kind === 'health' ? hpMat : arMat);
-    mesh.position.set(s.x, 1, s.z);
-    G.scene.add(mesh);
-    G.pickups.push({ mesh, kind: s.kind, taken: false });
+  // Tracer fade.
+  for (const t of [...G.tracers]) {
+    t.life -= dt;
+    if (t.life <= 0) { G.scene.remove(t.mesh); G.tracers.splice(G.tracers.indexOf(t), 1); }
   }
-  // Sun coins: golden spinning discs across the city.
-  G.coins = [];
-  const coinGeo = new THREE.TorusGeometry(0.5, 0.18, 8, 16);
-  const coinMat = new THREE.MeshLambertMaterial({ color: 0xffd24a, emissive: 0xaa7700 });
-  for (let i = 0; i < CFG.sunCoinCount; i++) {
-    const mesh = new THREE.Mesh(coinGeo, coinMat);
-    const x = G.rng.range(-260, 260);
-    const z = G.rng.range(-260, 260);
-    mesh.position.set(x, 1.2, z);
-    mesh.rotation.x = Math.PI / 2;
-    G.scene.add(mesh);
-    G.coins.push({ mesh, x, z, taken: false });
-  }
-}
-
-export function updatePickups(G, dt, time) {
-  const p = G.player;
-  const pos = p.car ? p.car.mesh.position : p.pos;
-  for (const pk of G.pickups) {
-    if (pk.taken) continue;
+  // Pickups.
+  for (const pk of [...G.pickups]) {
     pk.mesh.rotation.y += dt * 2;
-    pk.mesh.position.y = 1 + Math.sin(time * 2 + pk.mesh.position.x) * 0.15;
-    if (pk.mesh.position.distanceTo(pos) < 2.2) {
-      pk.taken = true;
-      pk.mesh.visible = false;
-      if (pk.kind === 'health') { p.hp = Math.min(CFG.maxHealth, p.hp + 40); G.hud.setToast('Health +40'); }
-      else { p.armor = Math.min(CFG.maxArmor, p.armor + 50); G.hud.setToast('Armor +50'); }
-      G.audio?.coin();
+    const d = Math.hypot(pk.x - p.pos.x, pk.z - p.pos.z);
+    if (d < 1.6) {
+      if (pk.kind === 'health') p.health = Math.min(100, p.health + 40);
+      else p.armor = Math.min(100, p.armor + 50);
+      G.audio.pickup();
+      G.scene.remove(pk.mesh);
+      G.pickups.splice(G.pickups.indexOf(pk), 1);
     }
   }
-  for (const c of G.coins) {
-    if (c.taken) continue;
-    c.mesh.rotation.z += dt * 2;
-    if (Math.hypot(c.x - pos.x, c.z - pos.z) < 2.2) {
-      c.taken = true;
-      c.mesh.visible = false;
-      p.cash += 25;
-      G.stats.coins += 1;
-      G.audio?.coin();
-      G.hud.setToast(`Sun coin! +$25 (${G.stats.coins}/${CFG.sunCoinCount})`);
-    }
-  }
+  if (G.muzzleT > 0) G.muzzleT -= dt;
 }
