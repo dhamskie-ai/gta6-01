@@ -21,55 +21,56 @@ export function applyShot(G, scene) {
     p.cash = 1240;
     startMission(G, 1);
     G.wanted = 3;
-    // Two police cars right behind.
-    const pc1 = spawnCar(G, 'sedan', 10, 18, Math.PI, { police: true });
+    // Two police cars converging ahead of the player's car.
+    const pc1 = spawnCar(G, 'sedan', 10, 22, 0, { police: true });
     pc1.isPolice = true; G.policeCars.push(pc1);
-    const pc2 = spawnCar(G, 'sedan', -12, 24, Math.PI, { police: true });
+    const pc2 = spawnCar(G, 'sedan', -12, 28, 0, { police: true });
     pc2.isPolice = true; G.policeCars.push(pc2);
     for (const [t, x, z] of extra) spawnCar(G, t, x, z, G.rng.range(0, 6));
-    p.camYaw = Math.PI; p.camPitch = 0.28; p.camDist = 11;
+    p.camYaw = Math.PI; p.camPitch = 0.3; p.camDist = 12;
     G.hud.setObjective('Courier Run — Antar paket 1/3 ke The Spires');
     G.hud.setPrompt('');
   } else if (scene === 'drive') {
     G.timeOfDay = 17.75;
-    p.pos.set(-250, 0, -40);
-    const car = spawnCar(G, 'sport', -250, -40, Math.PI / 2, { owned: true });
+    p.pos.set(-240, 0, -40);
+    const car = spawnCar(G, 'sport', -240, -40, 0, { owned: true });
     p.car = car; p.onFoot = false;
     p.cash = 860;
     startMission(G, 0);
     G.wanted = 0;
-    for (const [t, x, z] of [['sedan', -238, -90], ['taxi', -238, 30], ['hatch', -262, -140]]) {
-      spawnCar(G, t, x, z, 0);
+    for (const [t, x, z, yaw] of [['sedan', -237, -90, 0], ['taxi', -243, 30, Math.PI], ['hatch', -237, -140, 0]]) {
+      spawnCar(G, t, x, z, yaw);
     }
     // Pedestrians on the boardwalk.
     for (let i = 0; i < 6; i++) {
       const ped = G.peds[i];
       ped.mesh.position.set(-272 + G.rng.range(-4, 4), 0, -100 + i * 22);
     }
-    p.camYaw = Math.PI / 2; p.camPitch = 0.22; p.camDist = 10;
+    p.camYaw = 0; p.camPitch = 0.24; p.camDist = 11;
     G.hud.setObjective('First Gear — Kendarai ke bengkel Mara');
   } else if (scene === 'street') {
     G.timeOfDay = 12.0;
-    p.pos.set(-40, 0, 20);
+    p.pos.set(-30, 0, 0);
     p.car = null; p.onFoot = true;
     p.cash = 450;
     p.pistolOwned = true; p.weapon = 'pistol'; p.ammo = 12;
     startMission(G, 0);
     G.wanted = 0;
+    // Pedestrians on the sidewalks along road z=0.
     for (let i = 0; i < 8; i++) {
       const ped = G.peds[i];
-      ped.mesh.position.set(-60 + G.rng.range(-14, 14), 0, 0 + G.rng.range(-14, 14));
+      ped.mesh.position.set(-55 + i * 7, 0, i % 2 === 0 ? 8.5 : -8.5);
     }
     // Mara stands nearby as the mission NPC.
     const mara = G.talkNpcs[0];
-    mara.mesh.position.set(-34, 0, 14);
-    p.camYaw = Math.PI * 0.85; p.camPitch = 0.3; p.camDist = 7;
+    mara.mesh.position.set(-27, 0, 2);
+    p.camYaw = Math.PI; p.camPitch = 0.3; p.camDist = 8;
     G.hud.setObjective('First Gear — Jalan kaki ke mobil parkir di utara');
     G.hud.setPrompt('E — Bicara dengan Mara Voss');
   } else if (scene === 'night') {
     G.timeOfDay = 22.0;
-    p.pos.set(-260, 0, 40);
-    const car = spawnCar(G, 'sedan', -260, 40, Math.PI / 2, { owned: true });
+    p.pos.set(-258, 0, 55);
+    const car = spawnCar(G, 'sedan', -258, 55, Math.PI / 2, { owned: true });
     p.car = car; p.onFoot = false;
     p.cash = 2100;
     startMission(G, 4);

@@ -18,11 +18,11 @@ export function buildGroundTexture(rng) {
   const toPx = (v) => (v + half + 40) * scale;
   ctx.fillStyle = '#2f6fb4'; ctx.fillRect(0, 0, S, S); // sea
   ctx.fillStyle = '#e8d5a2'; ctx.fillRect(toPx(-300), 0, toPx(-270) - toPx(-300), S); // beach
-  ctx.fillStyle = '#7d8a7a';
+  ctx.fillStyle = '#8b9a82';
   ctx.fillRect(toPx(-300), 0, S - toPx(-300), S); // land base
   // district block tints
   for (const d of CFG.districts) {
-    ctx.fillStyle = '#8a8f7d';
+    ctx.fillStyle = '#9aa08a';
     ctx.fillRect(toPx(d.x0), toPx(d.z0), toPx(d.x1) - toPx(d.x0), toPx(d.z1) - toPx(d.z0));
   }
   // parks
@@ -31,7 +31,7 @@ export function buildGroundTexture(rng) {
   ctx.fillRect(toPx(120), toPx(-270), toPx(210) - toPx(120), toPx(-210) - toPx(-270));
   // roads
   const roads = roadCoords();
-  ctx.fillStyle = '#33363b';
+  ctx.fillStyle = '#3d4046';
   for (const v of roads) {
     ctx.fillRect(toPx(v - 6), 0, 12 * scale, S);
     ctx.fillRect(0, toPx(v - 6), S, 12 * scale);

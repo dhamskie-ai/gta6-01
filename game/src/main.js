@@ -206,7 +206,7 @@ function frame() {
     hp: Math.round(G.player.hp),
     inCar: !!G.player.car,
     carSpeed: G.player.car ? Math.round(G.player.car.speed * 3.6) : 0,
-    pos: [Math.round(G.player.pos.x), Math.round(G.player.pos.z)],
+    pos: G.player.car ? [Math.round(G.player.car.mesh.position.x), Math.round(G.player.car.mesh.position.z)] : [Math.round(G.player.pos.x), Math.round(G.player.pos.z)],
     timeOfDay: Math.round(G.timeOfDay * 10) / 10,
     enemies: G.enemies.length,
     traffic: G.traffic.length,

@@ -7,7 +7,7 @@ export function createRenderer(G) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -66,10 +66,10 @@ export function updateDayNight(G, dt) {
   const sun = G.sun;
   const ang = ((h - 6) / 12) * Math.PI;
   sun.position.set(Math.cos(ang) * 200, Math.sin(ang) * 180 + 10, 120);
-  sun.intensity = 0.15 + dayF * 2.1;
+  sun.intensity = 0.5 + dayF * 1.9;
   sun.color.setHSL(0.09 + duskF * 0.02, 0.7, 0.72 - duskF * 0.15);
-  G.hemi.intensity = 0.25 + dayF * 0.65;
-  G.moon.intensity = nightF * 0.35;
+  G.hemi.intensity = 0.45 + dayF * 0.55;
+  G.moon.intensity = nightF * 0.5;
   const skyTop = new THREE.Color().lerpColors(new THREE.Color(0x0a1030), new THREE.Color(0x3a7bd8), dayF);
   const skyBot = new THREE.Color().lerpColors(new THREE.Color(0x1a2040), new THREE.Color(0xffe0a8), dayF);
   if (duskF > 0) {
@@ -102,7 +102,7 @@ export function updateDayNight(G, dt) {
 function smoothDay(h) {
   // 1 at noon, 0 at midnight, smooth at dawn/dusk.
   const t = Math.sin(((h - 6) / 24) * Math.PI * 2);
-  return THREE.MathUtils.clamp(t * 1.4, 0, 1);
+  return THREE.MathUtils.clamp(t * 1.4 + 0.12, 0, 1);
 }
 
 // Simple particle pool for smoke, sparks, muzzle puffs, explosions.

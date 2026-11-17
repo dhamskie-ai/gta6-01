@@ -25,9 +25,9 @@ export function spawnTraffic(G) {
     mesh.rotation.y = yaw;
     G.scene.add(mesh);
     const car = {
-      mesh, type, yaw, speed: G.rng.range(7, 12),
+      mesh, type, yaw, speed: G.rng.range(7, 12), steer: 0,
       horizontal, road, dir, targetSpeed: G.rng.range(7, 12),
-      stuck: 0,
+      stuck: 0, driver: 'traffic', hp: CFG.carTypes[type].hp, smoke: 0,
     };
     G.cars.push(car);
     G.traffic.push(car);

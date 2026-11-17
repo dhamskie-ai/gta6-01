@@ -197,6 +197,9 @@ export function stealCar(G, car) {
   if (car.driver) {
     car.driver = null;
   }
+  // A stolen traffic car leaves the AI fleet — the player drives it now.
+  const ti = G.traffic.indexOf(car);
+  if (ti >= 0) G.traffic.splice(ti, 1);
   car.owned = true;
   G.player.car = car;
   G.player.onFoot = false;

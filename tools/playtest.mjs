@@ -45,20 +45,26 @@ await page.waitForTimeout(1000);
 console.log('after new game:', JSON.stringify(await state()));
 
 // Walk forward toward the parked car at (0, 60) — player starts at (0, 20),
-// facing north (+z). Hold W for up to 20 s, then press E to steal.
+// facing north (+z). SwiftShader runs ~1.3 FPS so game time crawls; allow
+// up to 120 s and press E every second so a passing traffic car is stolen
+// if one comes within reach first.
 let stolen = false;
 const started = Date.now();
 await page.keyboard.down('KeyW');
-while (Date.now() - started < 20000) {
+while (Date.now() - started < 120000) {
   const s = await state();
   if (!s) break;
+  if (s.inCar) { stolen = true; break; }
   if (s.pos && Math.abs(s.pos[1] - 60) < 8) break;
-  await page.waitForTimeout(500);
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(900);
 }
 await page.keyboard.up('KeyW');
 console.log('after walk:', JSON.stringify(await state()));
-await page.keyboard.press('KeyE');
-await page.waitForTimeout(800);
+if (!stolen) {
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(800);
+}
 let s = await state();
 console.log('after E (steal):', JSON.stringify(s));
 stolen = !!s?.inCar;
@@ -70,7 +76,7 @@ if (stolen) {
   s = await state();
   console.log('after drive:', JSON.stringify(s));
 }
-await page.screenshot({ path: '/home/hatch/workspace/makefun-all/gta6-01/repo/screenshots/playtest-end.jpg', type: 'jpeg', quality: 80 });
+await page.screenshot({ path: '/tmp/playtest-end.jpg', type: 'jpeg', quality: 80 });
 console.log('playtest done, stolen:', stolen, 'errors:', errors);
 await browser.close();
 process.exit(stolen && errors === 0 ? 0 : 1);
