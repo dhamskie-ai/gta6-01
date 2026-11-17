@@ -1,6 +1,7 @@
 // SOLARA BAY — interactive playtest via Playwright.
-// Clicks New Game, walks with WASD, steals the mission-1 car, drives,
-// and expects mission progress with 0 console/page errors.
+// State-driven (SwiftShader runs ~2 fps, so waits are by game state, not wall
+// time): click New Game, walk south to the parked mission car, steal it with
+// E, drive, and confirm window.__game shows progress. Fails on any error.
 import { chromium } from '/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright/index.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
@@ -34,49 +35,53 @@ let errors = 0;
 page.on('console', (m) => { if (m.type() === 'error') { errors += 1; console.log('console-error:', m.text()); } });
 page.on('pageerror', (e) => { errors += 1; console.log('pageerror:', String(e)); });
 
-const state = () => page.evaluate(() => window.__game || null);
+const state = () => page.evaluate(() => {
+  const g = window.__game;
+  if (!g) return null;
+  return { phase: g.phase, wanted: g.wanted, cash: g.cash, mission: g.mission, step: g.missionStep, pos: g.position, speed: g.speed, hp: g.health, onFoot: g.onFoot, cars: g.cars };
+});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 await page.goto('http://solarabay.game/', { waitUntil: 'load', timeout: 60000 });
-await page.waitForTimeout(1500);
-console.log('title state:', JSON.stringify(await state()));
-// Click "New Game" (center of the title overlay).
-await page.mouse.click(640, 430);
-await page.waitForTimeout(1000);
+await sleep(2000);
+console.log('title:', JSON.stringify(await state()));
+await page.click('#btn-new');
+await sleep(1500);
 console.log('after new game:', JSON.stringify(await state()));
 
-// Walk forward toward the parked car at (0, 60) — player starts at (0, 20),
-// facing north (+z). SwiftShader runs ~1.3 FPS so game time crawls; allow
-// up to 120 s and press E every second so a passing traffic car is stolen
-// if one comes within reach first.
-let stolen = false;
-const started = Date.now();
-await page.keyboard.down('KeyW');
-while (Date.now() - started < 120000) {
+// Walk to the parked mission car at (2.5, 36) from spawn (2.5, 24).
+// Camera yaw is pi, so S walks +z (toward the car).
+await page.keyboard.down('KeyS');
+let walked = false;
+for (let i = 0; i < 120; i++) {
+  await sleep(500);
   const s = await state();
-  if (!s) break;
-  if (s.inCar) { stolen = true; break; }
-  if (s.pos && Math.abs(s.pos[1] - 60) < 8) break;
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(900);
+  if (s && s.pos[1] >= 33) { walked = true; break; }
+}
+await page.keyboard.up('KeyS');
+console.log('walked:', walked, JSON.stringify(await state()));
+
+// Steal the car with E (mission step 0 -> 1).
+await page.keyboard.press('KeyE');
+await sleep(1500);
+const afterSteal = await state();
+console.log('after E:', JSON.stringify(afterSteal));
+const stole = afterSteal && !afterSteal.onFoot && afterSteal.step === 1;
+
+// Drive forward (+z) and check speed + position change.
+const startPos = afterSteal ? afterSteal.pos : [0, 0];
+await page.keyboard.down('KeyW');
+let drove = false;
+for (let i = 0; i < 120; i++) {
+  await sleep(500);
+  const s = await state();
+  if (s && s.speed > 5 && Math.hypot(s.pos[0] - startPos[0], s.pos[1] - startPos[1]) > 20) { drove = true; break; }
 }
 await page.keyboard.up('KeyW');
-console.log('after walk:', JSON.stringify(await state()));
-if (!stolen) {
-  await page.keyboard.press('KeyE');
-  await page.waitForTimeout(800);
-}
-let s = await state();
-console.log('after E (steal):', JSON.stringify(s));
-stolen = !!s?.inCar;
-if (stolen) {
-  // Drive forward for 6 seconds.
-  await page.keyboard.down('KeyW');
-  await page.waitForTimeout(6000);
-  await page.keyboard.up('KeyW');
-  s = await state();
-  console.log('after drive:', JSON.stringify(s));
-}
-await page.screenshot({ path: '/tmp/playtest-end.jpg', type: 'jpeg', quality: 80 });
-console.log('playtest done, stolen:', stolen, 'errors:', errors);
+const end = await state();
+console.log('after drive:', JSON.stringify(end));
+await page.screenshot({ path: '/home/hatch/workspace/makefun-all/gta6-01/repo/screenshots/playtest-end.jpg', type: 'jpeg', quality: 80, timeout: 120000 });
+
+console.log('playtest done, walked:', walked, 'stole:', stole, 'drove:', drove, 'errors:', errors);
 await browser.close();
-process.exit(stolen && errors === 0 ? 0 : 1);
+process.exit(walked && stole && drove && errors === 0 ? 0 : 1);
