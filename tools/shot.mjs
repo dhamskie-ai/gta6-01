@@ -11,7 +11,7 @@ const GAME_DIR = '/home/hatch/workspace/makefun-all/gta6-01/repo/game';
 const SHOT_DIR = '/home/hatch/workspace/makefun-all/gta6-01/repo/screenshots';
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
 // Pass one scene name to capture just that scene; the dossier itself
-// uses four shots (all seed 7, see shots.json) while harbor stays
+// uses four shots (all seed 8, see shots.json) while harbor stays
 // manual-only and never lands in the dossier.
 const single = process.argv[2] || null;
 const SHOT_LIST = [
@@ -65,7 +65,7 @@ for (const [scene, file] of SHOT_LIST) {
     failures += 1;
     console.log(scene, 'pageerror:', String(err));
   });
-  await page.goto(`http://solarabay.game/?shot=${scene}&seed=7`, { waitUntil: 'load', timeout: 60000 });
+  await page.goto(`http://solarabay.game/?shot=${scene}&seed=8`, { waitUntil: 'load', timeout: 60000 });
   try {
     await page.waitForFunction(() => window.__shotReady, null, { timeout: 60000 });
   } catch {
