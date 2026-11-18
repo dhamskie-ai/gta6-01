@@ -63,6 +63,20 @@ export function setupShot(G, name) {
     G.lightsOn = true;
     G.hud.showObjective('Neon Nights — tail Kane\'s courier from the pier');
     G.camYaw = Math.PI / 2; G.camPitch = 0.16; G.camDist = 7;
+  } else if (name === 'harbor') {
+    // The Docks at dusk: harbor lights, player in a car on the dock road, wanted 2.
+    G.timeOfDay = 19.5;
+    const car = spawnCar(G, 'sedan', 240, 30, 0, 'player');
+    car.speed = 10;
+    G.playerCar = car; p.onFoot = false; p.car = car; p.pos.set(240, 0, 30);
+    G.playerMesh.visible = false;
+    G.wanted = 2;
+    spawnPoliceCar(G);
+    G.policeCars[0].x = 240; G.policeCars[0].z = 48; G.policeCars[0].yaw = 0; G.policeCars[0].speed = 12;
+    G.mission.marker = { x: 216, z: 36 };
+    G.mission.beacon.position.set(216, 0, 36);
+    G.hud.showObjective('Harbor Lights — reach the harbor pier at dusk');
+    G.camYaw = Math.PI; G.camPitch = 0.18; G.camDist = 7; // camera behind the car (yaw + PI)
   }
   G.player.pos.y = 0;
   G.snapCamera = true;

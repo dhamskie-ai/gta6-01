@@ -9,7 +9,8 @@ import { join, extname } from 'node:path';
 const ROOT = '/home/hatch/workspace/makefun-all/gta6-01/repo/game';
 const OUT = '/home/hatch/workspace/makefun-all/gta6-01/repo/screenshots';
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
-const scenes = [['chase', '1-chase.jpg'], ['drive', '2-drive.jpg'], ['street', '3-street.jpg'], ['night', '4-night.jpg']];
+const only = process.argv[2] || null; // e.g. `node tools/shot.mjs harbor` captures one scene only
+const scenes = [['chase', '1-chase.jpg'], ['drive', '2-drive.jpg'], ['street', '3-street.jpg'], ['night', '4-night.jpg'], ['harbor', '5-harbor.jpg']].filter(([s]) => !only || s === only);
 
 const env = { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*' };
 const browser = await chromium.launch({
@@ -38,7 +39,7 @@ for (const [scene, file] of scenes) {
   });
   page.on('console', (m) => { if (m.type() === 'error') { errors += 1; console.log(scene, 'console-error:', m.text()); } });
   page.on('pageerror', (e) => { errors += 1; console.log(scene, 'pageerror:', String(e)); });
-  await page.goto(`http://solarabay.game/?shot=${scene}&seed=1`, { waitUntil: 'load', timeout: 60000 });
+  await page.goto(`http://solarabay.game/?shot=${scene}&seed=${scene === 'harbor' ? 7 : 1}`, { waitUntil: 'load', timeout: 60000 });
   try {
     await page.waitForFunction(() => window.__shotReady, null, { timeout: 60000 });
   } catch {

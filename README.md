@@ -3,7 +3,7 @@
 An open-world crime game in a sun-soaked coastal city, built with three.js.
 Play as **Ro Mendez**, a getaway driver back in Solara Bay, in debt to fixer
 **Sal Vega** and hunting developer **Dario Kane** — steal cars, outrun the
-police, and finish five story missions across six districts.
+police, and finish six story missions across six districts.
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
@@ -43,12 +43,14 @@ under `game/vendor/`.
   a mission prompt.
 - **4-night.jpg** — Marina Bay at night: neon signs, headlights, wanted ★,
   the pier and the ferris wheel.
+- **5-harbor.jpg** — The Docks at dusk: harbor lights, wanted ★★, a police
+  car closing in, and the new Harbor Lights mission objective.
 
 ## The city
 
 Six districts — Marina Bay, Old Solara, The Spires, The Docks, Vista Hills,
 Calle Verde — with ~120 procedural buildings, traffic and pedestrians,
-a wanted system with police cars and foot officers, 5 story missions, combat,
+a wanted system with police cars and foot officers, 6 story missions, combat,
 a day–night cycle with neon nights, and WebAudio synth sound and music.
 
 All names, characters, vehicles, story, art, sounds, and music are original.

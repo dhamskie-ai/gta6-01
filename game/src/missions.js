@@ -1,4 +1,4 @@
-// Story missions (5) + side activities: taxi fares, stunt jumps, sun coins.
+// Story missions (6) + side activities: taxi fares, stunt jumps, sun coins.
 import * as THREE from 'three';
 import { MISSIONS, CONFIG, TAXI_SPOTS, JUMP_RAMPS, SHOP_POS } from './config.js';
 import { spawnGuard, spawnPickup } from './combat.js';
@@ -170,6 +170,7 @@ export function updateMissions(G, dt) {
     // Mission 5 escape: wanted 4 while driving the Aurelia.
     if (def.id === 5 && m.step === 2 && G.wanted < 4) G.addWanted(4 - G.wanted, 'the whole city is after the Aurelia');
     if (def.id === 3 && m.step === 2 && G.wanted < 2) G.addWanted(2 - G.wanted, 'the Docks crew called it in');
+    if (def.id === 6 && m.step === 2 && G.wanted < 2) G.addWanted(2 - G.wanted, 'the harbor crew called it in');
   }
 
   // Taxi fares: press E near a waiting passenger.
