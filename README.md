@@ -1,54 +1,59 @@
 # SOLARA BAY
 
-An open-world crime game in a sun-soaked coastal city, built with three.js.
-Play as **Ro Mendez**, a getaway driver back in Solara Bay, in debt to fixer
-**Sal Vega** and hunting developer **Dario Kane** — steal cars, outrun the
-police, and finish six story missions across six districts.
+A 3D open-world crime game set in a bright coastal city, made with three.js.
+You play **Ro Mendez**, a getaway driver who has come home to Solara Bay
+owing money to fixer **Sal Vega** — and with a score to settle against
+developer **Dario Kane**. Lift cars, shake off the police, and work through
+six story missions across six districts.
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-Entered in the [make.fun bounty](https://make.fun/bounty/gta6-01) "Make GTA 6" ($1,666 in USDC, top 100).
+This is an entry for the [make.fun bounty](https://make.fun/bounty/gta6-01)
+"Make GTA 6" ($1,666 in USDC, top 100).
 
-## How to play
+## Playing
 
-- **WASD** move / drive · **Mouse** look · **Shift** run / handbrake · **Space** jump
-- **E** enter / steal a car (or exit it) · **Left click** punch / shoot
-- **R** reload · **1 / 2** switch fists / pistol · **M** mute · **Esc** pause
-- **C** camera distance · **F** headlights
+- **WASD** walk / drive · **Mouse** look around · **Shift** sprint / handbrake · **Space** jump
+- **E** get into or steal a car (or climb back out) · **Left click** punch / fire
+- **R** reload · **1 / 2** fists / pistol · **M** mute · **Esc** pause
+- **C** pull the camera back · **F** headlights
 
-Steal a car, lose the wanted stars by hiding or paying at Spray & Shine,
-follow the yellow beacon to the next mission checkpoint. Money comes from
-missions, taxi fares, stunt jumps, and 30 sun coins hidden around the city.
-Progress saves automatically after each mission and at the garage.
+Grab a car, then drop your wanted stars by laying low or paying for a new
+paint job at Spray & Shine, and chase the yellow beacon to the next mission
+checkpoint. Cash comes from missions, taxi fares, stunt jumps, and 30 sun
+coins tucked around the city. Your progress is saved on its own after every
+mission and whenever you roll into the garage.
 
-## How to run
+## Running it
 
 ```sh
 node serve.ts
 # open http://localhost:8080
 ```
 
-Static files only — no build step, no network requests. three.js is vendored
-under `game/vendor/`.
+Static files and nothing else — no build step, no network calls. three.js
+ships vendored under `game/vendor/`.
 
 ## Screenshots
 
-- **1-chase.jpg** — afternoon downtown chase: wanted ★★★, two police cars,
-  HUD with minimap, speed, and a mission objective.
-- **2-drive.jpg** — golden-hour coastal road: sport car, traffic, pedestrians,
-  and the sea.
-- **3-street.jpg** — daytime Old Solara market on foot: Ro, pedestrians, and
-  a mission prompt.
-- **4-night.jpg** — Marina Bay at night: neon signs, headlights, wanted ★,
-  the pier and the ferris wheel.
+- **1-chase.jpg** — a downtown chase in the afternoon: wanted ★★★, two
+  police cars behind you, HUD with minimap, speed, and a mission objective.
+- **2-drive.jpg** — a coastal road at golden hour: a sport car, traffic,
+  pedestrians, and the sea beyond the boardwalk.
+- **3-street.jpg** — an Old Solara market in daylight, on foot: Ro among
+  pedestrians, with a mission NPC and a prompt.
+- **4-night.jpg** — Marina Bay after dark: glowing signs, headlights,
+  wanted ★, the pier and the ferris wheel.
 
 ## The city
 
 Six districts — Marina Bay, Old Solara, The Spires, The Docks, Vista Hills,
-Calle Verde — with ~120 procedural buildings, traffic and pedestrians,
-a wanted system with police cars and foot officers, 6 story missions, combat,
-a day–night cycle with neon nights, and WebAudio synth sound and music.
+Calle Verde — holding around 120 procedurally built buildings, moving
+traffic and pedestrians, a wanted system with patrol cars and officers on
+foot, 6 story missions, combat, a full day–night cycle with neon nights,
+and synthesized WebAudio sound and music.
 
-All names, characters, vehicles, story, art, sounds, and music are original.
+Every name, character, vehicle, story beat, piece of art, sound, and tune
+is original.
