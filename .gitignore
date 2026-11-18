@@ -5,9 +5,11 @@
 # coverage/ — test coverage reports.
 # *.log — tool, server, and playtest logs.
 # .DS_Store — macOS Finder metadata, not part of the game.
+# screenshots/playtest-end.jpg — a local playtest capture, not a dossier shot; keep it out of commits.
 out/
 node_modules/
 dist/
 coverage/
 *.log
 .DS_Store
+screenshots/playtest-end.jpg

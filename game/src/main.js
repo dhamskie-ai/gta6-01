@@ -107,6 +107,7 @@ G.continueGame = () => {
   G.stats.coins = data.coins || 0; G.stats.carsStolen = data.carsStolen || 0;
   G.stats.maxWanted = data.maxWanted || 0; G.stats.playTime = data.playTime || 0;
   G.startPlaying();
+  // Clamp the saved mission index to 0–5 so a save on mission 6 (Harbor Lights) resumes there, never past the last mission.
   startMission(G, Math.min(data.mission, 5));
 };
 G.resumeGame = () => { G.phase = 'play'; showPause(G, false); };

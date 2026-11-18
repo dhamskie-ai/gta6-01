@@ -64,7 +64,7 @@ export const MISSIONS = [
       { text: 'Steal the Veloce GT Aurelia', kind: 'steal', pos: [36, 0] },
       { text: 'Escape the 4-star chase to the Marina pier', kind: 'escape', pos: [-240, 0], radius: 14 },
     ] },
-  { id: 6, name: 'Harbor Lights', reward: 600, briefing: 'Sal Vega: Debt\'s paid, Ro — but Kane\'s last shipment is still sitting at the harbor, lights on and nobody watching. Mara needs the manifest off that Hauler, Kip already found a buyer. One last run, then the bay is really yours.',
+  { id: 6, name: 'Harbor Lights', reward: 600, briefing: 'Sal Vega: The debt is settled, Ro — but Kane\'s final shipment is still parked at the harbor, lights blazing and no one guarding it. Mara wants the manifest from that Hauler, and Kip has already lined up a buyer. One last job, then the bay is truly yours.',
     steps: [
       { text: 'Reach the harbor pier at dusk', kind: 'goto', pos: [210, 30], radius: 12 },
       { text: 'Clear Kane\'s last guards at the pier', kind: 'clear', pos: [216, 36], count: 3 },

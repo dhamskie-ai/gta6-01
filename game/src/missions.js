@@ -1,4 +1,4 @@
-// Story missions (6) + side activities: taxi fares, stunt jumps, sun coins.
+// Six story missions (the finale: Harbor Lights) + side activities: taxi fares, stunt jumps, sun coins.
 import * as THREE from 'three';
 import { MISSIONS, CONFIG, TAXI_SPOTS, JUMP_RAMPS, SHOP_POS } from './config.js';
 import { spawnGuard, spawnPickup } from './combat.js';

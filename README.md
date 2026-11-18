@@ -43,8 +43,6 @@ under `game/vendor/`.
   a mission prompt.
 - **4-night.jpg** — Marina Bay at night: neon signs, headlights, wanted ★,
   the pier and the ferris wheel.
-- **5-harbor.jpg** — The Docks at dusk: harbor lights, wanted ★★, a police
-  car closing in, and the new Harbor Lights mission objective.
 
 ## The city
 

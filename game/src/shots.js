@@ -75,7 +75,7 @@ export function setupShot(G, name) {
     G.policeCars[0].x = 240; G.policeCars[0].z = 48; G.policeCars[0].yaw = 0; G.policeCars[0].speed = 12;
     G.mission.marker = { x: 216, z: 36 };
     G.mission.beacon.position.set(216, 0, 36);
-    G.hud.showObjective('Harbor Lights — reach the harbor pier at dusk');
+    G.hud.showObjective('Harbor Lights — get to the harbor pier before dark');
     G.camYaw = Math.PI; G.camPitch = 0.18; G.camDist = 7; // camera behind the car (yaw + PI)
   }
   G.player.pos.y = 0;
