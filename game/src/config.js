@@ -14,9 +14,9 @@ export const CONFIG = {
   carBrake: 30,
   carReverseMax: 12,
   carDrag: 0.6,
-  trafficCount: 14,
-  pedCount: 24,
-  parkedCount: 12,
+  trafficCount: 20,
+  pedCount: 36,
+  parkedCount: 16,
   wantedDecayHidden: 10,
   wantedClearHidden: 20,
   resprayPerStar: 100,
@@ -35,7 +35,7 @@ export const CAR_MODELS = {
   hatch:   { color: 0xd94f3d, len: 3.8, wid: 1.8, name: 'Pip',       top: 30, accel: 0.95, grip: 1.1 },
   taxi:    { color: 0xf2c200, len: 4.4, wid: 1.9, name: 'Cabro',     top: 32, accel: 1.0,  grip: 1.0 },
   van:     { color: 0x7a7f85, len: 5.0, wid: 2.1, name: 'Mula',      top: 26, accel: 0.8,  grip: 0.9 },
-  sport:   { color: 0xc22030, len: 4.5, wid: 2.0, name: 'Veloce GT', top: 46, accel: 1.35, grip: 1.25 },
+  sport:   { color: 0xff2e7e, len: 4.5, wid: 2.0, name: 'Veloce GT', top: 46, accel: 1.35, grip: 1.25 },
   truck:   { color: 0x2e7d5b, len: 6.2, wid: 2.3, name: 'Hauler',    top: 24, accel: 0.7,  grip: 0.85 },
 };
 

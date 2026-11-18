@@ -38,6 +38,8 @@ export function updateWantedLevel(G, dt) {
   while (G.footPolice.length > wantFoot) removeFootPolice(G, G.footPolice[0]);
 }
 
+const CALLSIGNS = ['IBIS-43', 'TARPON-10', 'HERON-17', 'KESTREL-31', 'MARLIN-26', 'OSPREY-08'];
+
 export function spawnPoliceCar(G) {
   const rng = G.rng;
   const p = G.player.pos;
@@ -46,10 +48,15 @@ export function spawnPoliceCar(G) {
   const z = Math.max(-240, Math.min(240, p.z + Math.sin(a) * 70));
   const car = spawnCar(G, 'sedan', x, z, 0, 'police');
   car.group.children[0].material = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-  // Light bar.
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
-  bar.position.set(0, 1.5, 0); car.group.add(bar);
-  car.lightBar = bar;
+  // Split light bar: red left half, blue right half, flashing in turn.
+  const barRed = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+  barRed.position.set(-0.32, 1.5, 0); car.group.add(barRed);
+  const barBlue = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0x2244ff }));
+  barBlue.position.set(0.32, 1.5, 0); car.group.add(barBlue);
+  car.lightBarRed = barRed;
+  car.lightBarBlue = barBlue;
+  car.callsign = CALLSIGNS[(G._policeSeq = (G._policeSeq || 0) + 1, (G._policeSeq - 1) % CALLSIGNS.length)];
+  car.role = 'PURSUIT';
   car.speed = 10; car.cruise = 30;
   G.policeCars.push(car);
   return car;
@@ -88,6 +95,7 @@ export function updatePolice(G, dt) {
   for (const car of G.policeCars) {
     const dx = p.x - car.x, dz = p.z - car.z;
     const d = Math.hypot(dx, dz) || 1;
+    car.role = d < 25 ? 'RAMMING' : 'PURSUIT';
     const wantYaw = Math.atan2(dx, dz);
     let diff = wantYaw - car.yaw;
     while (diff > Math.PI) diff -= Math.PI * 2;
@@ -102,7 +110,12 @@ export function updatePolice(G, dt) {
     car.group.position.set(car.x, 0, car.z);
     car.group.rotation.y = car.yaw;
     car.wheelSpin += car.speed * dt * 2.4;
-    if (car.lightBar) car.lightBar.material.color.setHex(Math.sin(t * 10) > 0 ? 0xff2222 : 0x2244ff);
+    // Alternating flash: red bright while blue is dim, then the reverse.
+    const redOn = Math.sin(t * 10) > 0;
+    if (car.lightBarRed) {
+      car.lightBarRed.material.color.setHex(redOn ? 0xff2222 : 0x550000);
+      car.lightBarBlue.material.color.setHex(redOn ? 0x000044 : 0x2244ff);
+    }
     // Ram the player's car.
     if (G.playerCar && d < 3.6) {
       G.playerCar.speed *= 0.85;
@@ -127,5 +140,71 @@ export function updatePolice(G, dt) {
     }
     // Position/animation are written by updatePeds from x/z/yaw.
   }
+  updateHelicopter(G, dt);
   G.audio.updateSiren(t);
+}
+
+// Police helicopter: built once, lazily. At wanted 3+ it orbits the
+// player overhead with spinning rotors, a blinking beacon and a
+// searchlight cone; below wanted 3 it stays hidden.
+function buildHelicopter(G) {
+  const heli = new THREE.Group();
+  const darkBlue = new THREE.MeshLambertMaterial({ color: 0x1a2a4a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 4.2), darkBlue);
+  heli.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.24, 0.4, 4.24), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  stripe.position.y = 0.1; heli.add(stripe);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.9, 1.2), new THREE.MeshLambertMaterial({ color: 0x9fd8e8 }));
+  glass.position.set(0, 0.2, 2.0); heli.add(glass);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 4.5), darkBlue);
+  boom.position.set(0, 0.3, -4.0); heli.add(boom);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.4, 1.0), darkBlue);
+  fin.position.set(0, 0.9, -6.0); heli.add(fin);
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(11, 0.08, 0.5), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  rotor.position.y = 1.1; heli.add(rotor);
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 0.4), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  tailRotor.position.set(0.4, 0.9, -6.0); heli.add(tailRotor);
+  const skidMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+  for (const sx of [-0.9, 0.9]) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 4.4), skidMat);
+    skid.position.set(sx, -1.1, 0); heli.add(skid);
+  }
+  const beacon = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff2222 }),
+  );
+  beacon.position.set(0, -0.95, 0); heli.add(beacon);
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(5, 24, 16, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2b0, transparent: true, opacity: 0.14,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }),
+  );
+  cone.position.y = -13; heli.add(cone);
+  heli.visible = false;
+  G.scene.add(heli);
+  G._heli = { group: heli, rotor, tailRotor, beacon, angle: Math.PI / 2 };
+  return G._heli;
+}
+
+function updateHelicopter(G, dt) {
+  if (!G._heli) buildHelicopter(G);
+  const heli = G._heli;
+  if (G.wanted < 3) {
+    heli.group.visible = false;
+    return;
+  }
+  heli.group.visible = true;
+  heli.angle += dt * 0.22;
+  const p = G.player.pos;
+  heli.group.position.set(
+    p.x + Math.cos(heli.angle) * 30,
+    14 + Math.sin(G.time * 0.4) * 1.5,
+    p.z + Math.sin(heli.angle) * 30,
+  );
+  heli.group.rotation.y = -heli.angle;
+  heli.rotor.rotation.y += dt * 18;
+  heli.tailRotor.rotation.x += dt * 22;
+  heli.beacon.material.color.setHex(Math.sin(G.time * 6) > 0 ? 0xff2222 : 0x550000);
 }

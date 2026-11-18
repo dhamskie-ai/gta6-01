@@ -27,14 +27,17 @@ export function setupShot(G, name) {
     hero.pos.set(0, 0, -20);
     G.playerMesh.visible = false;
     G.wanted = 3;
+    G.mission.timer = 126; // 2:06 left on the Courier Run clock.
     spawnPoliceCar(G);
     spawnPoliceCar(G);
     G.policeCars[0].x = -4;
     G.policeCars[0].z = -8;
     G.policeCars[0].yaw = 0;
     G.policeCars[0].speed = 24;
-    G.policeCars[1].x = 5;
-    G.policeCars[1].z = -30;
+    // Second unit pulls alongside on the right, in frame, rather than
+    // sitting behind the chase camera where it cannot be seen.
+    G.policeCars[1].x = 8;
+    G.policeCars[1].z = -6;
     G.policeCars[1].yaw = 0;
     G.policeCars[1].speed = 24;
     G.hud.showObjective('Courier Run — deliver parcel 1 to Calle Verde');
@@ -58,6 +61,7 @@ export function setupShot(G, name) {
     G.camDist = 7;
   } else if (name === 'street') {
     // Midday in the Old Solara market, on foot: crowds, an NPC, a prompt.
+    G.mission.index = 0; // First Gear, so the panel reads CH 1, STAGE 1/2.
     G.timeOfDay = 12.0;
     hero.pos.set(0, 0, 132);
     hero.yaw = 0;
@@ -78,6 +82,7 @@ export function setupShot(G, name) {
     G.camDist = 6;
   } else if (name === 'night') {
     // Marina Bay after dark: neon, headlights on, wanted 1, pier and wheel.
+    G.mission.index = 3; // Neon Nights, matching the tail-the-courier objective.
     G.timeOfDay = 22.0;
     const ride = spawnCar(G, 'sedan', -240, -6, -Math.PI / 2, 'player');
     ride.speed = 12;
@@ -95,6 +100,7 @@ export function setupShot(G, name) {
     G.camDist = 7;
   } else if (name === 'harbor') {
     // The Docks at dusk: harbor lights, Ro in a car on the dock road, wanted 2.
+    G.mission.index = 5; // Harbor Lights, matching the pier objective.
     G.timeOfDay = 19.5;
     const ride = spawnCar(G, 'sedan', 240, 30, 0, 'player');
     ride.speed = 10;

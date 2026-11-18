@@ -1,24 +1,56 @@
-// HUD: DOM bars/stars/cash/clock, minimap canvas, menus, save/load.
-import { MISSIONS, SHOP_POS } from './config.js';
+// HUD: mission panel, vitals, cash/stars/clock/day, police response list,
+// circular minimap with district + respect, portrait dialogue, radio,
+// speedometer with car-condition bar, menus, save/load.
+import { MISSIONS, SHOP_POS, districtAt } from './config.js';
+
+const ROLES = {
+  'Sal Vega': 'FIXER', 'Kip': 'DRIVER', 'Mara': 'MECHANIC',
+  'Juno Reyes': 'WHEELWOMAN', 'Dario Kane': 'DEVELOPER',
+};
+const TRACKS = [
+  'Pink Horizon — Lumen Kids', 'Midnight Marina — Vela',
+  'Sunset Strip — The Palms', 'Neon Drive — Coral Skies',
+];
+
+function portraitHtml(speaker) {
+  const words = speaker.split(' ');
+  const initials = (words[0]?.[0] || '?') + (words[1]?.[0] || '');
+  let hue = 0;
+  for (const ch of speaker) hue = (hue + ch.charCodeAt(0)) % 360;
+  return `<div class="portrait" style="background:linear-gradient(135deg,hsl(${hue},70%,55%),hsl(${(hue + 60) % 360},70%,35%))">${initials}</div>`;
+}
 
 export function createHud(G) {
   const $ = (id) => document.getElementById(id);
   const hud = {
     el: $('hud'), healthFill: $('health-fill'), armorFill: $('armor-fill'),
     weapon: $('weapon'), stars: $('stars'), cash: $('cash'), clock: $('clock'),
-    objective: $('objective'), prompt: $('prompt'), dialog: $('dialog'),
-    toastEl: $('toast'), speed: $('speed'), minimap: $('minimap'),
+    dayEl: $('day'), objective: $('objective'), prompt: $('prompt'), dialog: $('dialog'),
+    toastEl: $('toast'), speed: $('speed'), speedNum: $('speed-num'), carName: $('car-name'),
+    conditionWrap: $('condition-wrap'), conditionFill: $('condition-fill'),
+    minimap: $('minimap'), districtEl: $('district-name'),
+    respectFill: $('respect-fill'), respectLabel: $('respect-label'),
+    chapterEl: $('mission-chapter'), timerEl: $('mission-timer'),
+    stageEl: $('mission-stage'), nextEl: $('mission-next'),
+    policeList: $('police-list'), radioTrack: $('radio-track'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
     title: $('title'), pause: $('pause'), gameover: $('gameover'),
-    toastT: 0, dialogT: 0, bannerT: 0,
+    toastT: 0, dialogT: 0, bannerT: 0, policeT: 1, // build the list on frame 1
     showPrompt(text) {
       hud.prompt.style.display = text ? 'block' : 'none';
       hud.prompt.textContent = text;
     },
     showObjective(text) { hud.objective.textContent = text; },
     showDialog(who, text) {
-      hud.dialog.innerHTML = `<b>${who}:</b> ${text}`;
-      hud.dialog.style.display = 'block'; hud.dialogT = 7;
+      // Briefings arrive as "Name: line" — split the speaker from the line.
+      let speaker = who, body = text;
+      const m = text.match(/^([^:]{1,30}):\s*(.*)$/);
+      if (m) { speaker = m[1]; body = m[2]; }
+      const role = ROLES[speaker] || 'CONTACT';
+      hud.dialog.innerHTML = `${portraitHtml(speaker)}<div class="dialog-body">`
+        + `<div class="dialog-name">${speaker.toUpperCase()} · ${role}</div>`
+        + `<div class="dialog-text">${body}</div></div>`;
+      hud.dialog.style.display = 'flex'; hud.dialogT = 7;
     },
     toast(text) {
       hud.toastEl.textContent = text; hud.toastEl.style.display = 'block'; hud.toastT = 3;
@@ -44,6 +76,31 @@ export function createHud(G) {
   return hud;
 }
 
+function formatTimer(seconds) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function rebuildPoliceList(G) {
+  const hud = G.hud;
+  if (G.wanted <= 0) {
+    hud.policeList.style.display = 'none';
+    return;
+  }
+  const p = G.player.pos;
+  let html = `<div class="police-head">HKPD RESPONSE · ${G.policeCars.length + G.footPolice.length} UNITS</div>`;
+  for (const car of G.policeCars) {
+    const d = Math.round(Math.hypot(car.x - p.x, car.z - p.z));
+    const cls = car.role === 'RAMMING' ? 'tag-ram' : 'tag-pursuit';
+    html += `<div class="police-row"><span>${car.callsign || 'UNIT'}</span><span>${d}m</span><span class="tag ${cls}">${car.role || 'PURSUIT'}</span></div>`;
+  }
+  if (G.footPolice.length > 0) {
+    html += `<div class="police-more">+${G.footPolice.length} more unit${G.footPolice.length > 1 ? 's' : ''} in the search zone</div>`;
+  }
+  hud.policeList.innerHTML = html;
+  hud.policeList.style.display = 'block';
+}
+
 export function updateHud(G, dt) {
   const hud = G.hud;
   const p = G.player;
@@ -51,10 +108,40 @@ export function updateHud(G, dt) {
   hud.armorFill.style.width = `${Math.max(0, p.armor)}%`;
   hud.weapon.textContent = p.weapon === 1 ? `Pistol — ${p.ammo} / 12` : 'Fists';
   hud.stars.textContent = '★'.repeat(G.wanted) + '☆'.repeat(5 - G.wanted);
-  hud.cash.textContent = `$${p.cash}`;
+  hud.cash.textContent = `$${p.cash.toLocaleString('en-US')}`;
+  hud.dayEl.textContent = `DAY ${G.day || 1}`;
   const h = Math.floor(G.timeOfDay) % 24, m = Math.floor((G.timeOfDay % 1) * 60);
   hud.clock.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  hud.speed.innerHTML = G.playerCar ? `${Math.round(Math.abs(G.playerCar.speed) * 3.6)}<small>km/h · ${G.playerCar.spec.name}</small>` : '0<small>km/h · on foot</small>';
+  // Mission panel: chapter, timer, stage and next step, live from state.
+  const def = MISSIONS[G.mission.index];
+  if (def) {
+    hud.chapterEl.textContent = `CH ${G.mission.index + 1} · ${def.name.toUpperCase()}`;
+    if (def.time && G.mission.timer > 0) {
+      hud.timerEl.textContent = formatTimer(G.mission.timer);
+      hud.timerEl.style.display = '';
+    } else hud.timerEl.style.display = 'none';
+    hud.stageEl.textContent = `STAGE ${Math.min(G.mission.step + 1, def.steps.length)}/${def.steps.length}`;
+    const next = def.steps[G.mission.step + 1];
+    if (next) { hud.nextEl.textContent = `NEXT: ${next.text}`; hud.nextEl.style.display = ''; }
+    else hud.nextEl.style.display = 'none';
+  }
+  // Speedometer + car name + condition bar (hidden on foot).
+  hud.speedNum.textContent = G.playerCar ? Math.round(Math.abs(G.playerCar.speed) * 3.6) : 0;
+  hud.carName.textContent = G.playerCar ? G.playerCar.spec.name.toUpperCase() : 'ON FOOT';
+  if (G.playerCar) {
+    hud.conditionWrap.style.display = 'block';
+    hud.conditionFill.style.width = `${Math.max(0, G.playerCar.health)}%`;
+  } else hud.conditionWrap.style.display = 'none';
+  // Radio: one invented track every 25 seconds.
+  hud.radioTrack.textContent = TRACKS[Math.floor(G.time / 25) % TRACKS.length];
+  // Police response list, rebuilt at most twice a second.
+  hud.policeT += dt;
+  if (hud.policeT > 0.5) { hud.policeT = 0; rebuildPoliceList(G); }
+  // District name + respect under the minimap.
+  hud.districtEl.textContent = districtAt(p.pos.x, p.pos.z).name.toUpperCase();
+  const respect = Math.min(5, (G.stats.missionsDone || 0) + 1);
+  hud.respectFill.style.width = `${respect * 20}%`;
+  hud.respectLabel.textContent = `RESPECT ${respect}`;
   if (hud.toastT > 0) { hud.toastT -= dt; if (hud.toastT <= 0) hud.toastEl.style.display = 'none'; }
   if (hud.dialogT > 0) { hud.dialogT -= dt; if (hud.dialogT <= 0) hud.dialog.style.display = 'none'; }
   if (hud.bannerT > 0) { hud.bannerT -= dt; if (hud.bannerT <= 0) hud.banner.style.display = 'none'; }
@@ -64,7 +151,7 @@ export function updateHud(G, dt) {
 function drawMinimap(G) {
   const cv = G.hud.minimap;
   const g = cv.getContext('2d');
-  const S = 180, HALF = 300;
+  const S = 200, HALF = 300;
   const toMap = (x, z) => [(x + HALF) / (HALF * 2) * S, (z + HALF) / (HALF * 2) * S];
   g.fillStyle = '#0e1a24'; g.fillRect(0, 0, S, S);
   g.fillStyle = '#1f6f9f'; g.fillRect(0, 0, 8, S); // sea strip

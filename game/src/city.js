@@ -1,18 +1,21 @@
-// City generation: districts, road grid, buildings, palms, lamps, landmarks.
-// Draw calls kept low: ground is one canvas-textured plane; buildings, palms,
-// lamps, containers and coins are InstancedMesh. Seeded RNG: same city per ?seed=.
+// City generation: districts, road grid, buildings, palms, lamps, neon,
+// storefronts, traffic lights, birds, landmarks. Draw calls kept low:
+// ground is one canvas-textured plane; buildings, palms, lamps,
+// containers and coins are InstancedMesh. Seeded RNG: same city per ?seed=.
 import * as THREE from 'three';
 import { CONFIG, districtAt } from './config.js';
 
 const STREETS = [];
 for (let c = CONFIG.streetMin; c <= CONFIG.streetMax; c += CONFIG.streetStep) STREETS.push(c);
 
-function windowTexture() {
+// Three facade variants: different base tones and lit-window ratios, so
+// no two blocks read the same. Dark windows are a warm slate, never black.
+function windowTexture(base, litRatio, litColor) {
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
   const g = cv.getContext('2d');
-  g.fillStyle = '#cfcfcf'; g.fillRect(0, 0, 128, 256);
+  g.fillStyle = base; g.fillRect(0, 0, 128, 256);
   for (let y = 12; y < 244; y += 22) for (let x = 10; x < 118; x += 22) {
-    g.fillStyle = Math.random() < 0.55 ? '#ffd98a' : '#2a3242';
+    g.fillStyle = Math.random() < litRatio ? litColor : '#4a5a75';
     g.fillRect(x, y, 14, 14);
   }
   const tex = new THREE.CanvasTexture(cv);
@@ -30,9 +33,23 @@ function textTexture(text, fg, bg) {
   return tex;
 }
 
-// Whole ground plan in one texture: grass, beach, roads, dashes, crossings.
+// Soft radial glow used behind every neon sign.
+function haloTexture() {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Whole ground plan in one texture: grass, beach, roads, sidewalks,
+// dashes, and a zebra crossing at every intersection.
 // Canvas x maps world x (-360..340), canvas y maps world z (-310..310).
-function groundTexture() {
+function groundTexture(maxAniso) {
   const W = 2048, H = 1818;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
@@ -44,20 +61,30 @@ function groundTexture() {
   g.fillStyle = '#8a7f72'; // plaza
   g.fillRect(X(-30), Z(120), 60 * SX, 60 * SZ);
   for (const s of STREETS) {
-    g.fillStyle = '#33363c';
+    // Pale sidewalk strips flanking the road on both sides.
+    g.fillStyle = '#b8b0a0';
+    g.fillRect(X(-300), Z(s + 5), 600 * SX, 3 * SZ);
+    g.fillRect(X(-300), Z(s - 8), 600 * SX, 3 * SZ);
+    g.fillRect(X(s + 5), Z(-300), 3 * SX, 600 * SZ);
+    g.fillRect(X(s - 8), Z(-300), 3 * SX, 600 * SZ);
+    g.fillStyle = '#3d4149';
     g.fillRect(X(-300), Z(s - 5), 600 * SX, 10 * SZ);
     g.fillRect(X(s - 5), Z(-300), 10 * SX, 600 * SZ);
     g.fillStyle = '#d8c25a';
     g.fillRect(X(-300), Z(s) - 1, 600 * SX, 2);
     g.fillRect(X(s) - 1, Z(-300), 2, 600 * SZ);
   }
+  // Zebra crossings at every intersection, both directions.
   g.fillStyle = '#e8e8e8';
-  for (const sx of [-120, 0, 120]) for (const sz of [-120, 0, 120]) {
-    for (let i = -2; i <= 2; i++) g.fillRect(X(sx + i * 2 - 0.6), Z(sz + 3), 1.2 * SX, 8 * SZ);
+  for (const sx of STREETS) for (const sz of STREETS) {
+    for (let i = -2; i <= 2; i++) {
+      g.fillRect(X(sx + i * 2 - 0.6), Z(sz + 3), 1.2 * SX, 8 * SZ);
+      g.fillRect(X(sx + 3), Z(sz + i * 2 - 0.6), 8 * SX, 1.2 * SZ);
+    }
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 1;
+  tex.anisotropy = maxAniso;
   return tex;
 }
 
@@ -87,15 +114,95 @@ function setInstance(mesh, i, x, y, z, ry, sx, sy, sz) {
   mesh.setMatrixAt(i, _m4);
 }
 
+// Merge a list of { geo, matrix, color } parts into one geometry with
+// vertex colours. No BufferGeometryUtils in the vendor bundle, so the
+// concatenation is done by hand over non-indexed position/normal/uv.
+function mergeParts(parts) {
+  const positions = [], normals = [], uvs = [], colors = [];
+  const col = new THREE.Color();
+  for (const part of parts) {
+    const geo = part.geo.index ? part.geo.toNonIndexed() : part.geo;
+    geo.applyMatrix4(part.matrix);
+    const pos = geo.attributes.position.array;
+    const nor = geo.attributes.normal.array;
+    const uv = geo.attributes.uv ? geo.attributes.uv.array : null;
+    col.setHex(part.color);
+    for (let i = 0; i < pos.length; i += 3) {
+      positions.push(pos[i], pos[i + 1], pos[i + 2]);
+      normals.push(nor[i], nor[i + 1], nor[i + 2]);
+      if (uv) uvs.push(uv[(i / 3) * 2], uv[(i / 3) * 2 + 1]);
+      else uvs.push(0, 0);
+      colors.push(col.r, col.g, col.b);
+    }
+    if (geo !== part.geo) geo.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  return out;
+}
+
+// One palm: a leaning 3-segment trunk, ten drooping fronds in two layers
+// (six long drooping, four flatter for volume), three coconuts.
+function palmGeometry() {
+  const parts = [];
+  const dummy = new THREE.Object3D();
+  const TRUNK = 0x8a6a42, GREEN_A = 0x2f8f4e, GREEN_B = 0x3aa860, NUT = 0x6a4a26;
+  for (let i = 0; i < 3; i++) {
+    dummy.position.set(i * 0.34, 1.3 + i * 2.4, 0);
+    dummy.rotation.set(0, 0, -0.07 * i);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    parts.push({ geo: new THREE.CylinderGeometry(0.2, 0.34, 2.6, 6), matrix: dummy.matrix.clone(), color: TRUNK });
+  }
+  const crown = new THREE.Vector3(0.68, 7.4, 0);
+  for (let i = 0; i < 10; i++) {
+    const long = i < 6;
+    const a = (i / 10) * Math.PI * 2 + (long ? 0 : 0.31);
+    // Each frond bends in two segments: a shallow base that arcs out,
+    // then a tip that hangs down, so the crown reads as drooping
+    // fronds instead of one flat fan.
+    const len1 = long ? 2.0 : 1.3, len2 = long ? 2.0 : 1.3;
+    const base = new THREE.Matrix4().makeTranslation(crown.x, crown.y, crown.z)
+      .multiply(new THREE.Matrix4().makeRotationY(-a))
+      .multiply(new THREE.Matrix4().makeRotationZ(-0.35));
+    const blade1 = new THREE.BoxGeometry(len1, 0.06, 0.4);
+    blade1.translate(len1 / 2, 0, 0);
+    parts.push({ geo: blade1, matrix: base, color: i % 2 ? GREEN_A : GREEN_B });
+    const tip = base.clone()
+      .multiply(new THREE.Matrix4().makeTranslation(len1, 0, 0))
+      .multiply(new THREE.Matrix4().makeRotationZ(-0.85));
+    const blade2 = new THREE.BoxGeometry(len2, 0.06, 0.34);
+    blade2.translate(len2 / 2, 0, 0);
+    parts.push({ geo: blade2, matrix: tip, color: i % 2 ? GREEN_B : GREEN_A });
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.5;
+    dummy.position.set(crown.x + Math.cos(a) * 0.5, crown.y - 0.35, crown.z + Math.sin(a) * 0.5);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    parts.push({ geo: new THREE.SphereGeometry(0.28, 8, 6), matrix: dummy.matrix.clone(), color: NUT });
+  }
+  return mergeParts(parts);
+}
+
 export function buildCity(G) {
   const { scene, rng } = G;
-  const city = { buildings: [], lamps: [], lampHeads: [], neonMats: [], ferris: null, coins: [], colliders: [] };
+  const city = { buildings: [], lamps: [], lampHeads: [], neonMats: [], neonHalos: [], ferris: null, coins: [], colliders: [], trafficLights: [], birds: [] };
   G.city = city;
-  const winTex = windowTexture();
+  const winTexs = [
+    windowTexture('#cfcfcf', 0.62, '#ffd98a'),
+    windowTexture('#b8c4d0', 0.5, '#ffb36a'),
+    windowTexture('#d8cbb0', 0.72, '#ff9a5a'),
+  ];
 
   // Ground (one textured plane) + sea.
+  const maxAniso = G.renderer ? G.renderer.capabilities.getMaxAnisotropy() : 4;
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(700, 620),
-    new THREE.MeshLambertMaterial({ map: groundTexture() }));
+    new THREE.MeshLambertMaterial({ map: groundTexture(maxAniso) }));
   ground.rotation.x = -Math.PI / 2; ground.position.set(-10, 0, 0); ground.receiveShadow = true;
   scene.add(ground);
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(220, 620),
@@ -104,7 +211,7 @@ export function buildCity(G) {
 
   // Buildings: collect transforms per facade material, then instance them.
   const facadeCols = [0x8a7f72, 0x7d8aa0, 0xa08a6a, 0x6a7d8a, 0x9a6a6a, 0x707a68];
-  const mats = facadeCols.map((c) => new THREE.MeshLambertMaterial({ color: c, map: winTex }));
+  const mats = facadeCols.map((c, i) => new THREE.MeshLambertMaterial({ color: c, map: winTexs[i % 3] }));
   const perMat = mats.map(() => []);
   const roofs = [];
   for (let bx = -210; bx <= 210; bx += 60) for (let bz = -210; bz <= 210; bz += 60) {
@@ -140,20 +247,25 @@ export function buildCity(G) {
   roofs.forEach((r, i) => setInstance(roofMesh, i, r.x, r.h + 1, r.z, 0, r.w, 2, r.d));
   scene.add(roofMesh);
 
-  // Palm trees (instanced trunk + crown) along the coast and plaza.
+  // Palm trees: one merged geometry per palm, drawn as a single
+  // InstancedMesh. Coast + plaza rows, plus avenue rows flanking the
+  // z = 0 and x = 0 roads.
   const palmSpots = [];
-  for (let z = -240; z <= 240; z += 40) { palmSpots.push([-258, z]); palmSpots.push([-232, z + 20]); }
+  for (let z = -240; z <= 240; z += 40) { palmSpots.push([-258, z]); }
+  // East boardwalk row, spaced wide so no palm crowds the chase camera
+  // on the coastal road.
+  for (let z = -240; z <= 240; z += 60) { palmSpots.push([-232, z + 30]); }
   for (let x = -180; x <= 180; x += 60) palmSpots.push([x + 14, 150]);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a6a42 });
-  const leafMat = new THREE.MeshLambertMaterial({ color: 0x2f8f4e });
-  const trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.4, 7, 6), trunkMat, palmSpots.length);
-  const crowns = new THREE.InstancedMesh(new THREE.ConeGeometry(2.6, 3.4, 7), leafMat, palmSpots.length);
+  for (let x = -240; x <= 240; x += 36) { palmSpots.push([x, 8]); palmSpots.push([x, -8]); }
+  for (let z = -240; z <= 240; z += 36) { palmSpots.push([8, z]); palmSpots.push([-8, z]); }
+  const palmGeo = palmGeometry();
+  const palmMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const palms = new THREE.InstancedMesh(palmGeo, palmMat, palmSpots.length);
   palmSpots.forEach(([px, pz], i) => {
-    setInstance(trunks, i, px, 3.5, pz, 0, 1, 1, 1);
-    setInstance(crowns, i, px, 8.2, pz, 0, 1, 1, 1);
+    setInstance(palms, i, px, 0, pz, rng.range(0, Math.PI * 2), rng.range(0.9, 1.25), rng.range(0.9, 1.25), rng.range(0.9, 1.25));
   });
-  trunks.castShadow = true; crowns.castShadow = true;
-  scene.add(trunks); scene.add(crowns);
+  palms.castShadow = true;
+  scene.add(palms);
 
   // Street lamps (instanced pole + head, one shared head material).
   const poleMat = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
@@ -169,13 +281,18 @@ export function buildCity(G) {
   });
   scene.add(poles); scene.add(heads);
 
-  // Neon signs (emissive at night).
+  // Neon signs, each with a tinted additive halo behind it so the sign
+  // glows at dusk and night. Halos are dimmed by day in the render pass.
+  const haloTex = haloTexture();
   const neons = [
     { text: 'SOLARA', fg: '#ff5fa2', bg: '#1a0a18', pos: [-258, 14, -60], ry: Math.PI / 2 },
     { text: 'PIER 9', fg: '#4ae3ff', bg: '#06121c', pos: [-286, 8, 24], ry: Math.PI / 2 },
     { text: "MARA'S GARAGE", fg: '#ffd23f', bg: '#14100a', pos: [-60, 7, -24], ry: 0 },
     { text: "CAL'S GUNS", fg: '#7dff9a', bg: '#0a140a', pos: [60, 7, 114], ry: 0 },
     { text: 'SPRAY & SHINE', fg: '#c98aff', bg: '#120a1c', pos: [-60, 7, 36], ry: 0 },
+    { text: 'FLAMINGO FM', fg: '#ff5fa2', bg: '#1a0a18', pos: [-252, 16, 120], ry: Math.PI },
+    { text: 'VICE HOTEL', fg: '#4ae3ff', bg: '#06121c', pos: [30, 12, 96], ry: 0 },
+    { text: 'TACOS 24H', fg: '#ffd23f', bg: '#14100a', pos: [-30, 8, 132], ry: 0 },
   ];
   for (const n of neons) {
     const m = new THREE.MeshBasicMaterial({ map: textTexture(n.text, n.fg, n.bg) });
@@ -183,6 +300,78 @@ export function buildCity(G) {
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(16, 4), m);
     sign.position.set(n.pos[0], n.pos[1], n.pos[2]); sign.rotation.y = n.ry; scene.add(sign);
     city.neonMats.push(m);
+    const nx = Math.sin(n.ry), nz = Math.cos(n.ry);
+    const haloMat = new THREE.MeshBasicMaterial({
+      map: haloTex, color: new THREE.Color(n.fg), transparent: true, opacity: 0.12,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(26, 9), haloMat);
+    halo.position.set(n.pos[0] - nx * 0.2, n.pos[1], n.pos[2] - nz * 0.2);
+    halo.rotation.y = n.ry;
+    scene.add(halo);
+    city.neonHalos.push(haloMat);
+  }
+
+  // Small glowing shop signs pasted on ground-floor building faces.
+  const shopSigns = [
+    ['TACOS', '#ffd23f', '#3a1a08'], ['DONUTS', '#ff9ad5', '#2a0a1e'],
+    ['BAR', '#7dff9a', '#0a140a'], ['HOTEL', '#4ae3ff', '#06121c'],
+    ['PIZZA', '#ff8a3d', '#1c0e06'], ['24H MART', '#c98aff', '#120a1c'],
+  ];
+  let shopCount = 0;
+  for (const b of city.buildings) {
+    if (shopCount >= 22) break;
+    if (!rng.chance(0.35)) continue;
+    const [text, fg, bg] = shopSigns[shopCount % shopSigns.length];
+    const south = rng.chance(0.5);
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(8, 2),
+      new THREE.MeshBasicMaterial({ map: textTexture(text, fg, bg) }),
+    );
+    sign.position.set(b.x, 2.6, b.z + (south ? b.hd + 0.15 : -b.hd - 0.15));
+    sign.rotation.y = south ? 0 : Math.PI;
+    scene.add(sign);
+    shopCount++;
+  }
+
+  // Traffic lights at four intersections: pole + arm + head, cycling
+  // green 4 s, amber 1 s, red 4 s, offset per intersection.
+  for (let li = 0; li < 4; li++) {
+    const [ix, iz] = [[0, 0], [120, -120], [-120, 120], [120, 120]][li];
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 5.5, 6), poleMat);
+    pole.position.set(ix + 6.5, 2.75, iz + 6.5); scene.add(pole);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 5), poleMat);
+    arm.position.set(ix + 6.5, 5.4, iz + 4); scene.add(arm);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.7, 0.5), poleMat);
+    head.position.set(ix + 6.5, 4.6, iz + 1.8); scene.add(head);
+    const dotGeo = new THREE.SphereGeometry(0.2, 8, 6);
+    const red = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: 0x550000 }));
+    const amber = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: 0x554400 }));
+    const green = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: 0x00aa33 }));
+    red.position.set(ix + 6.5, 5.15, iz + 2.1);
+    amber.position.set(ix + 6.5, 4.6, iz + 2.1);
+    green.position.set(ix + 6.5, 4.05, iz + 2.1);
+    scene.add(red); scene.add(amber); scene.add(green);
+    city.trafficLights.push({ red, amber, green, offset: li * 2.3 });
+  }
+
+  // Six birds circling high over the city, wings flapping.
+  const wingMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide });
+  for (let i = 0; i < 6; i++) {
+    const bird = new THREE.Group();
+    const wingGeo = new THREE.PlaneGeometry(1.3, 0.4);
+    const wingL = new THREE.Mesh(wingGeo, wingMat);
+    wingL.position.x = -0.65;
+    const wingR = new THREE.Mesh(wingGeo, wingMat);
+    wingR.position.x = 0.65;
+    bird.add(wingL); bird.add(wingR);
+    scene.add(bird);
+    city.birds.push({
+      group: bird, wingL, wingR,
+      cx: rng.range(-120, 120), cz: rng.range(-120, 120),
+      radius: rng.range(60, 160), height: rng.range(55, 90),
+      speed: rng.range(0.05, 0.12), phase: rng.range(0, Math.PI * 2),
+    });
   }
 
   // Marina pier + ferris wheel.
@@ -239,7 +428,10 @@ export function buildCity(G) {
     arm.position.set(cx, 24, 100); scene.add(arm);
   }
 
-  // Park trees in Calle Verde (instanced).
+  // Park trees in Calle Verde (instanced). They keep the old trunk/leaf
+  // materials, shared with the palm builder above.
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a6a42 });
+  const leafMat = new THREE.MeshLambertMaterial({ color: 0x2f8f4e });
   const parkSpots = [];
   for (let i = 0; i < 10; i++) parkSpots.push([rng.range(-200, -100), rng.range(160, 230), rng.range(2.2, 3.4)]);
   const parkTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.3, 0.45, 3, 6), trunkMat, parkSpots.length);
@@ -266,7 +458,8 @@ export function buildCity(G) {
   return city;
 }
 
-// Per-frame city animation: spin sun coins (hide taken ones).
+// Per-frame city animation: spin sun coins (hide taken ones), cycle the
+// traffic lights, and fly the birds.
 const _e = new THREE.Euler();
 export function updateCityFx(G, dt) {
   const city = G.city;
@@ -284,6 +477,25 @@ export function updateCityFx(G, dt) {
     city.coinMesh.setMatrixAt(coin.index, _m4);
   }
   city.coinMesh.instanceMatrix.needsUpdate = true;
+  for (const light of city.trafficLights) {
+    const ph = (G.time + light.offset) % 9;
+    const state = ph < 4 ? 'green' : ph < 5 ? 'amber' : 'red';
+    light.red.material.color.setHex(state === 'red' ? 0xff2222 : 0x550000);
+    light.amber.material.color.setHex(state === 'amber' ? 0xffaa00 : 0x554400);
+    light.green.material.color.setHex(state === 'green' ? 0x22ff66 : 0x003311);
+  }
+  for (const bird of city.birds) {
+    const a = bird.phase + G.time * bird.speed;
+    bird.group.position.set(
+      bird.cx + Math.cos(a) * bird.radius,
+      bird.height + Math.sin(G.time * 0.5 + bird.phase) * 3,
+      bird.cz + Math.sin(a) * bird.radius,
+    );
+    bird.group.rotation.y = -a;
+    const flap = Math.sin(G.time * 6 + bird.phase) * 0.55;
+    bird.wingL.rotation.z = 0.25 + flap;
+    bird.wingR.rotation.z = -0.25 - flap;
+  }
 }
 
 // Circle vs building/container AABB: push the point out, report a hit.

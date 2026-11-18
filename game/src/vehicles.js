@@ -6,6 +6,7 @@ import { collideBuildings } from './city.js';
 
 const WHEEL_CAP = 256; // 64 cars x 4 wheels
 let wheelMesh = null;
+let hubMesh = null;
 const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -19,6 +20,13 @@ export function initWheelInstances(G) {
   wheelMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   wheelMesh.frustumCulled = false;
   G.scene.add(wheelMesh);
+  // Hubcaps: light-grey discs on the same matrices, one extra draw call.
+  hubMesh = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.2, 0.2, 0.32, 8),
+    new THREE.MeshLambertMaterial({ color: 0xc8ccd2 }), WHEEL_CAP);
+  hubMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  hubMesh.frustumCulled = false;
+  G.scene.add(hubMesh);
 }
 
 // Write every car's 4 wheel matrices into the shared instanced mesh.
@@ -35,11 +43,17 @@ export function updateWheelInstances(G) {
       _q.setFromEuler(_e);
       _m4.compose(_v, _q, _s);
       wheelMesh.setMatrixAt(w, _m4);
+      if (hubMesh) hubMesh.setMatrixAt(w, _m4);
       w++;
     }
   }
-  for (; w < WHEEL_CAP; w++) { _m4.makeScale(0, 0, 0); wheelMesh.setMatrixAt(w, _m4); }
+  for (; w < WHEEL_CAP; w++) {
+    _m4.makeScale(0, 0, 0);
+    wheelMesh.setMatrixAt(w, _m4);
+    if (hubMesh) hubMesh.setMatrixAt(w, _m4);
+  }
   wheelMesh.instanceMatrix.needsUpdate = true;
+  if (hubMesh) hubMesh.instanceMatrix.needsUpdate = true;
 }
 
 export function makeCarModel(type) {
@@ -53,6 +67,36 @@ export function makeCarModel(type) {
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.88, cabinH, spec.len * (type === 'truck' ? 0.28 : 0.5)), darkMat);
   cabin.position.set(0, 1.2 + cabinH / 2 - 0.3, type === 'truck' ? spec.len * 0.28 : -spec.len * 0.05);
   cabin.castShadow = true; g.add(cabin);
+  // Body-colour roof panel sitting on top of the cabin.
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.9, 0.1, spec.len * (type === 'truck' ? 0.28 : 0.52)), bodyMat);
+  roof.position.set(0, 1.2 + cabinH - 0.3 + 0.05, type === 'truck' ? spec.len * 0.28 : -spec.len * 0.05);
+  roof.castShadow = true; g.add(roof);
+  // Slanted glass windshield at the front of the cabin.
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fd8e8 });
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.8, 0.06, 0.85), glassMat);
+  shield.position.set(0, 1.35, spec.len * 0.2);
+  shield.rotation.x = 0.5;
+  g.add(shield);
+  // Side mirrors on both front doors.
+  for (const sx of [-1, 1]) {
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.22), darkMat);
+    mirror.position.set(sx * (spec.wid / 2 + 0.08), 1.15, spec.len * 0.16);
+    g.add(mirror);
+  }
+  // Dark front + rear bumpers.
+  const bumperF = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.22, 0.16), darkMat);
+  bumperF.position.set(0, 0.42, spec.len / 2 + 0.06); g.add(bumperF);
+  const bumperR = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.22, 0.16), darkMat);
+  bumperR.position.set(0, 0.42, -spec.len / 2 - 0.06); g.add(bumperR);
+  // Rear spoiler on the sport model only, held up by two struts.
+  if (type === 'sport') {
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.9, 0.08, 0.5), darkMat);
+    wing.position.set(0, 1.28, -spec.len / 2 + 0.25); wing.castShadow = true; g.add(wing);
+    for (const sx of [-0.6, 0.6]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.32, 0.08), darkMat);
+      strut.position.set(sx, 1.08, -spec.len / 2 + 0.25); g.add(strut);
+    }
+  }
   if (type === 'taxi') {
     const sign = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 0.4), new THREE.MeshBasicMaterial({ color: 0xffe14a }));
     sign.position.set(0, 1.75, 0); g.add(sign);

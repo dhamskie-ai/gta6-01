@@ -24,6 +24,7 @@ const G = {
   seed,
   time: 0,
   timeOfDay: 14,
+  day: 1,
   phase: 'title',
   wanted: 0,
   hiddenT: 0,
@@ -41,7 +42,7 @@ const G = {
   coins: [],
   lastShotT: -99,
   muzzleT: 0,
-  stats: { carsStolen: 0, coins: 0, maxWanted: 0, playTime: 0 },
+  stats: { carsStolen: 0, coins: 0, maxWanted: 0, playTime: 0, missionsDone: 0 },
 };
 G.player = {
   pos: new THREE.Vector3(2.5, 0, 24),
@@ -126,7 +127,7 @@ G.newGame = () => {
   hero.pos.set(2.5, 0, 24);
   hero.yaw = 0;
   G.wanted = 0;
-  G.stats = { carsStolen: 0, coins: 0, maxWanted: 0, playTime: 0 };
+  G.stats = { carsStolen: 0, coins: 0, maxWanted: 0, playTime: 0, missionsDone: 0 };
   G.playerCar = null;
   G.playerMesh.visible = true;
   G.startPlaying();
@@ -149,6 +150,7 @@ G.continueGame = () => {
   G.stats.carsStolen = data.carsStolen || 0;
   G.stats.maxWanted = data.maxWanted || 0;
   G.stats.playTime = data.playTime || 0;
+  G.stats.missionsDone = Math.min(data.mission || 0, 5);
   G.startPlaying();
   // Keep the saved mission inside 0–5, so a save made on mission 6
   // (Harbor Lights) picks up there and never past the final mission.

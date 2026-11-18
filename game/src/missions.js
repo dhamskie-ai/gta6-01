@@ -119,6 +119,7 @@ function setupMissionStep(G) {
 export function completeMission(G) {
   const missionDef = MISSIONS[G.mission.index];
   G.player.cash += missionDef.reward;
+  G.stats.missionsDone = (G.stats.missionsDone || 0) + 1;
   G.mission.beacon.visible = false;
   G.mission.marker = null;
   G.mission.state = 'complete';
