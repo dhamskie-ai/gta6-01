@@ -1,8 +1,9 @@
-# SOLARA BAY — Make GTA 6 (gta6-01)
+# SOLARA BAY — Make GTA 6 (make.fun gta6-01)
 
 Open-world crime game 3D (three.js) di kota pantai fiktif Solara Bay.
-Protagonis **Nico**, sopir pelarian yang pulang dan bekerja untuk **Marco**
-(smuggler/wheelman) demi melunasi utang, sambil memburu developer **Dario Kane**.
+Nico pulang ke kotanya: curi mobil, kabur dari PCPD, kerjakan 8 job untuk
+Marco dan Lupe di sepanjang Malecón Celeste — dengan radio CELESTE 98.1
+mengiringi dari VELOZ COMET RS.
 
 ## Main
 
@@ -11,35 +12,35 @@ node serve.ts
 # buka http://localhost:8080
 ```
 
-Offline, tanpa login, tanpa network request. Keyboard + mouse di desktop,
-kontrol sentuh (joystick + tombol MASUK/KELUAR/REM/KAM) di HP.
+Tidak ada build step, tidak ada network request: semua art prosedural
+(geometri three.js + canvas texture) dan semua suara WebAudio sintetis.
 
 ## Kontrol
 
-- WASD jalan / nyetir, Shift lari & handbrake, Space lompat
-- E masuk / keluar mobil, mouse geser = kamera, scroll = zoom
-- Klik kiri tembak, 1/2/3 ganti senjata, R isi peluru
-- F aktivitas: taksi, balapan jalanan, mancing, foto, paket kilat
-- H klakson, M mute, Esc jeda
+- WASD jalan / nyetir, Shift lari / handbrake, Space lompat / rem
+- Mouse: putar kamera (klik untuk pointer lock), scroll/C: jarak kamera
+- E: masuk / keluar mobil, bicara dengan NPC
+- H: klakson · M: mute · 1/2/3: senjata · R: reload
+- T: taksi · R: balapan (di mobil) · F: mancing · P: foto · K: paket kilat
+- HP (layar sentuh): joystick kiri, tombol MASUK/KELUAR, REM, KAM, TEMBAK
 
 ## Sistem
 
-- Kota 600×600 m, 7 distrik: Malecón Celeste, Marina Bay, Old Solara,
-  The Spires, The Docks, Vista Hills, Calle Verde
-- 8 misi cerita (First Gear → Golden Hour), wanted 0–5 + PCPD
-  (mobil patroli, polisi jalan kaki, helikopter di wanted ≥ 3)
-- Traffic AI 22 mobil + ~90 pejalan kaki berkerumun di Malecón, pasar,
-  kafe pantai, plaza — plus pedagang kaki lima & kios pasar
-- 7 model mobil detail (sedan, VELOZ COMET RS sport, taksi, truk, van,
-  bus, polisi) — semua bisa dicuri & dikendarai
-- Aktivitas: supir taksi (timer + bayaran), balapan jalanan dadakan lawan
-  2 AI, mancing dengan timing bar + koleksi 4 jenis ikan, 6 spot foto
-  tersembunyi, misi sampingan paket kilat
-- Siklus siang–malam: golden hour oranye-ungu, neon menyala, jendela
-  menyala, lampu depan mobil, bintang & bulan detail
-- Suara WebAudio sintetis: mesin mengikuti kecepatan, klakson, rem/skid,
-  sirene, ambien kota + kicau burung, musik pad A-minor
-- Save otomatis di localStorage setelah tiap misi
+- Kota 640×640 m: Malecón Celeste, Old Solara, Plaza Spires, The Docks,
+  mercusuar, dermaga, kincir ria, pantai + jetski, bus & taco truck
+- 8 misi cerita (First Gear, Meet Marco, Courier Run, Docks Job, Neon
+  Nights, Street Race, Beach Party, Golden Hour) + 5 aktivitas sampingan:
+  taksi $40, balapan $120, mancing $15/ikan, 6 spot foto (+$60), paket $60
+- Wanted 0–5 bintang, patroli PCPD + polisi jalan kaki + helikopter di 3+
+- 7 model mobil drivable (sport, taksi, sedan, van, truk, bus, polisi)
+- Siklus siang–malam, sunset oranye-ungu, neon, jendela menyala malam
+- Save otomatis di localStorage setelah tiap misi selesai
+
+## Screenshot
+
+```sh
+node tools/shot.mjs chase    # dst: screenshots/1-chase.jpg
+```
 
 ## Dossier
 
@@ -47,6 +48,4 @@ kontrol sentuh (joystick + tombol MASUK/KELUAR/REM/KAM) di HP.
 MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-## Lisensi
-
-MIT — lihat `LICENSE`.
+Lisensi: MIT — lihat LICENSE.

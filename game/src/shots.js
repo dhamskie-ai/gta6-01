@@ -1,72 +1,117 @@
-// Scene deterministik ?shot= + window.__shotReady + window.__game.
-import { G } from './config.js';
-import { spawnVehicle } from './vehicles.js';
-import { startMission } from './missions.js';
-import { addWanted } from './police.js';
-import { distToMissionCar } from './player.js';
-let frames = 0;
-export function setupShot() {
-  const q = new URLSearchParams(location.search);
-  G.shot = q.get('shot') || '';
-  if (!G.shot) return;
-  G.state = 'playing';
-  document.getElementById('title').style.display = 'none';
-  document.getElementById('hud').style.display = 'block';
-  const placeCar = (x, z, heading) => {
-    const v = G.vehicles.find((x) => x.type === 'sport' && x.parked) || spawnVehicle('sport', x, z, heading, { parked: true });
-    v.x = x; v.z = z; v.heading = heading; v.mesh.position.set(x, 0, z); v.mesh.rotation.y = heading;
-    return v;
-  };
-  if (G.shot === 'chase') {
-    G.timeOfDay = 18.3; G.day = 1;
-    const v = placeCar(0, 60, Math.PI);
-    G.player.x = 0; G.player.z = 60; G.player.yaw = Math.PI; G.camYaw = Math.PI;
-    v.parked = false; G.car = v; v.speed = 22;
-    startMission(2); addWanted(3, '');
-    // Polisi di-spawn 40–50 m di belakang (bukan 18 m) supaya mereka
-    // terlihat mendekat di HUD saat capture, bukan sudah menempel.
-    spawnVehicle('police', 6, 100, Math.PI, { callsign: 'PELICAN-11' });
-    spawnVehicle('police', -6, 112, Math.PI, { callsign: 'GECKO-25' });
-  } else if (G.shot === 'drive') {
-    G.timeOfDay = 17.5;
-    const v = placeCar(-240, 0, Math.PI / 2);
-    G.player.x = -240; G.player.z = 0; G.player.yaw = Math.PI / 2; G.camYaw = Math.PI / 2;
-    v.parked = false; G.car = v; v.speed = 18;
-    startMission(1);
-  } else if (G.shot === 'street') {
-    G.timeOfDay = 12;
-    G.player.x = -250; G.player.z = 46; G.player.yaw = Math.PI / 2; G.camYaw = Math.PI / 2;
-    startMission(1);
-    G.dialog = { name: 'Marco', role: 'SMUGGLER · WHEELMAN', text: 'Marlin Ceviche, Malecón. Aku tunggu di meja luar — jangan telat.', until: 9999 };
-  } else if (G.shot === 'night') {
-    G.timeOfDay = 21;
-    const v = placeCar(120, 120, Math.PI);
-    G.player.x = 120; G.player.z = 120; G.player.yaw = Math.PI; G.camYaw = Math.PI;
-    v.parked = false; G.car = v; v.speed = 12;
-    startMission(4); addWanted(1, '');
-  } else if (G.shot === 'harbor') {
-    G.timeOfDay = 18.4;
-    G.player.x = -280; G.player.z = 0; G.player.yaw = -Math.PI / 2; G.camYaw = -Math.PI / 2;
-    startMission(7);
+// Deterministic screenshot scenes (?shot=...&seed=8). Each scene stages
+// the player, cars, police, wanted level and time of day, waits a few
+// frames, then sets window.__shotReady. If staging throws, the error is
+// logged but the shot still resolves — a hung shot helps nobody.
+import { G, CFG } from './config.js';
+import { makeCar, isCarObj } from './vehicles.js';
+import { forceDrive, teleportPlayer } from './player.js';
+import { startMission, spawnMarco, spawnLupe } from './missions.js';
+import { setWanted } from './police.js';
+import { showDialog } from './hud.js';
+
+function sportAt(x, z, heading, speed) {
+  const car = makeCar('sport', x, z, heading);
+  car.driver = false;
+  G.cars.push(car);
+  forceDrive(car, speed);
+  return car;
+}
+
+function flankPolice() {
+  for (const [x, z, name] of [[5, 34, 'KESTREL-31'], [-5, 48, 'BARRACUDA-18']]) {
+    const p = makeCar('police', x, z, 0);
+    p.speed = 30; p.callsign = name; p.role = 'RAMMING'; p.kind = 'car';
+    G.police.push(p);
   }
-  G.objective = G.objective || 'Jelajahi Solara Bay';
 }
+
+function nearTraffic(n, x, z, heading) {
+  let placed = 0;
+  for (const c of G.traffic) {
+    if (!isCarObj(c) || placed >= n) continue;
+    c.x = x + placed * 9; c.z = z + placed * 14; c.heading = heading;
+    c.speed = 10; c.horiz = false;
+    placed++;
+  }
+}
+
+export function setupShot(name) {
+  try {
+    G.shotFrames = 0; G.shotReady = false;
+    if (name === 'chase') {
+      G.timeOfDay = 18.0; G.cash = 86250;
+      startMission(2);
+      sportAt(0, 40, 0, 31); // 112 km/h down the boulevard
+      setWanted(4);
+      flankPolice();
+      G.camDist = 12;
+    } else if (name === 'drive') {
+      G.timeOfDay = 17.5; G.cash = 10350;
+      startMission(2);
+      sportAt(-240, -40, 0, 19); // 68 km/h on the Malecón road
+      setWanted(0);
+      nearTraffic(3, -240, 10, 0);
+      G.camDist = 11;
+    } else if (name === 'street') {
+      G.timeOfDay = 12.0; G.cash = 10350;
+      startMission(1);
+      teleportPlayer(-241.5, 64, Math.PI / 2);
+      spawnMarco();
+      spawnLupe();
+      setWanted(0);
+      G.camYaw = Math.PI / 2; G.camDist = 8;
+      showDialog('Marco', 'SMUGGLER · WHEELMAN', 'Nico! Over here — Marlin Ceviche. We talk, then you drive me to the pier.');
+    } else if (name === 'night') {
+      G.timeOfDay = 21.5; G.cash = 10350;
+      startMission(4);
+      sportAt(-252, 108, 0, 12); // 43 km/h, headlights on
+      setWanted(1);
+      nearTraffic(1, -244, 126, 0);
+      G.camDist = 11;
+    } else if (name === 'roadzoom') {
+      // Close-up of the road surface: dashes + zebra must read sharp.
+      G.timeOfDay = 15.0; G.cash = 10350;
+      startMission(0);
+      teleportPlayer(5, -10, 0);
+      const car = makeCar('sport', 7, 26, 0.15);
+      car.driver = false; G.cars.push(car);
+      setWanted(0);
+      G.shotCam = { pos: [1.5, 2.4, -16], look: [0.5, 0.2, 34] };
+    } else if (name === 'touch') {
+      G.timeOfDay = 17.8; G.cash = 10350;
+      startMission(2);
+      sportAt(-240, -30, 0, 16);
+      setWanted(0);
+      nearTraffic(2, -240, 16, 0);
+      G.camDist = 11;
+    } else if (name === 'phone') {
+      G.timeOfDay = 18.0; G.cash = 10350;
+      startMission(1);
+      teleportPlayer(-258, 20, -Math.PI / 2);
+      spawnMarco();
+      setWanted(0);
+      G.camYaw = -Math.PI / 2; G.camPitch = -0.08; G.camDist = 7;
+    }
+  } catch (e) {
+    console.error('setupShot failed:', e && e.message ? e.message : e);
+  }
+}
+
+// Called once per frame from the main loop while shotMode is on.
 export function shotTick() {
-  if (!G.shot) return;
-  frames++;
-  if (frames === 12) window.__shotReady = true;
-}
-export function exposeGame() {
-  window.__game = {
-    ready: G.ready, state: G.state, px: G.player.x, pz: G.player.z,
-    driving: !!G.car, car: G.car ? G.car.name : null,
-    speed: G.car ? Math.round(Math.abs(G.car.speed) * 3.6) : 0,
-    distToMissionCar: distToMissionCar(), wanted: G.wanted, cash: G.cash,
-    mission: G.missionIdx, step: G.missionStep, health: G.health,
-    taxi: G.taxi, race: G.race, fishing: G.fishing, photos: G.photos.length, fish: G.fish.length,
-    audio: window.__audio || null, yaw: G.player.yaw, camYaw: G.camYaw,
-    prompt: G.prompt, toast: G.toast,
-    calls: G.renderer ? G.renderer.info.render.calls : 0,
-    tris: G.renderer ? G.renderer.info.render.triangles : 0,
-  };
+  if (G.shotCam) {
+    // fixed close-up camera, applied after the normal chase cam
+    G.camera.position.set(G.shotCam.pos[0], G.shotCam.pos[1], G.shotCam.pos[2]);
+    G.camera.lookAt(G.shotCam.look[0], G.shotCam.look[1], G.shotCam.look[2]);
+  }
+  if (G.shotName === 'street' || G.shotName === 'phone') {
+    // re-show every frame: at ~1 fps in SwiftShader the 5.2 s dialog
+    // timeout would otherwise expire before the screenshot is taken.
+    showDialog('Marco', 'SMUGGLER · WHEELMAN', 'Nico! Over here — Marlin Ceviche. We talk, then you drive me to the pier.');
+  }
+  G.shotFrames++;
+  if (!G.shotReady && G.shotFrames >= 5) {
+    G.shotReady = true;
+    window.__shotReady = true;
+  }
 }

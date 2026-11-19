@@ -1,105 +1,171 @@
-// Nico jalan kaki + kamera third-person + masuk/keluar mobil.
+// Nico on foot: WASD + Shift run + Space jump, E enter/exit car, steal
+// (driver pulled out), third-person chase camera (mouse orbit, C zoom,
+// touch drag). driveCarRef() is the ONLY way gameplay reads the driven
+// car, and it refuses anything that is not a real car object.
 import * as THREE from 'three';
 import { G, CFG } from './config.js';
-import { clamp } from './random.js';
-import { axis, wasPressed } from './input.js';
-import { nearestVehicle, enterCar, exitCar, updatePlayerCar } from './vehicles.js';
-import { playBlip } from './audio.js';
-let armL, armR, legL, legR, body;
-export function buildPlayer() {
-  const g = new THREE.Group();
-  const shirt = new THREE.MeshLambertMaterial({ color: 0xff5da2 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3e50 });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xe0ac69 });
-  body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.85, 0.36), shirt); body.position.y = 1.05; g.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), skin); head.position.y = 1.72; g.add(head);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.44), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-  cap.position.y = 1.94; g.add(cap);
-  armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.7, 0.18), skin); armL.position.set(-0.42, 1.05, 0); g.add(armL);
-  armR = armL.clone(); armR.position.x = 0.42; g.add(armR);
-  legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.75, 0.22), pants); legL.position.set(-0.16, 0.38, 0); g.add(legL);
-  legR = legL.clone(); legR.position.x = 0.16; g.add(legR);
-  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-  G.scene.add(g);
-  G.player.mesh = g;
-  return g;
+import { keys, pressed, mouse, touch, axis } from './input.js';
+import { isCarObj, nearestCar, updateCarPhysics } from './vehicles.js';
+import { collideCircle } from './city.js';
+import { sfx } from './audio.js';
+import { onInteract } from './missions.js';
+import { setWanted } from './police.js';
+import { spawnPed } from './traffic.js';
+
+let mesh = null, legL = null, legR = null, armL = null, armR = null;
+
+export function driveCarRef() {
+  const c = G.player.car;
+  if (!c || typeof c !== 'object' || typeof c.speed !== 'number' || !c.group) return null;
+  return c;
 }
+
+export function initPlayer() {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshLambertMaterial({ color: 0xc22030 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.34), jacket);
+  body.position.y = 1.05; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8),
+    new THREE.MeshLambertMaterial({ color: 0xc98a5e }));
+  head.position.y = 1.68; g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.12, 10),
+    new THREE.MeshLambertMaterial({ color: 0x1e3a5e }));
+  cap.position.y = 1.86; g.add(cap);
+  const legM = new THREE.MeshLambertMaterial({ color: 0x2c3242 });
+  legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.6, 0.22), legM);
+  legL.position.set(0, 0.3, 0.14); g.add(legL);
+  legR = legL.clone(); legR.position.z = -0.14; g.add(legR);
+  const armM = new THREE.MeshLambertMaterial({ color: 0xc22030 });
+  armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.55, 0.18), armM);
+  armL.position.set(0, 1.05, 0.3); g.add(armL);
+  armR = armL.clone(); armR.position.z = -0.3; g.add(armR);
+  g.position.copy(G.player.pos);
+  G.scene.add(g); mesh = g;
+}
+
+export function enterCar(car) {
+  if (!isCarObj(car)) return false;
+  if (car.driver) {
+    // pull the driver out: he becomes a fleeing pedestrian
+    car.driver = false;
+    const d = spawnPed(car.x + 2, car.z + 2, {});
+    d.flee = 4;
+    if (G.wanted < 5) setWanted(G.wanted + 1, 'steal');
+  }
+  G.player.car = car; G.player.onFoot = false; car.stolen = true;
+  G.stats.stolen++;
+  mesh.visible = false;
+  sfx.click();
+  return true;
+}
+
+export function exitCar() {
+  const car = driveCarRef();
+  G.player.onFoot = true;
+  if (car) {
+    const a = car.heading + Math.PI / 2;
+    G.player.pos.set(car.x + Math.sin(a) * 2.2, 0, car.z + Math.cos(a) * 2.2);
+    G.player.heading = car.heading;
+    G.player.car = null;
+  }
+  mesh.visible = true;
+  mesh.position.copy(G.player.pos);
+}
+
+// Shot staging helpers: put Nico in a car (or on foot) without the
+// steal/wanted side effects of the gameplay path.
+export function forceDrive(car, speed) {
+  if (!isCarObj(car)) return false;
+  G.player.car = car; G.player.onFoot = false;
+  car.stolen = true; car.speed = speed || 0;
+  G.player.pos.set(car.x, 0, car.z);
+  G.player.heading = car.heading;
+  mesh.visible = false;
+  return true;
+}
+
+export function teleportPlayer(x, z, heading) {
+  if (driveCarRef()) exitCar();
+  G.player.pos.set(x, 0, z);
+  G.player.heading = heading ?? 0;
+  G.player.car = null; G.player.onFoot = true;
+  mesh.visible = true;
+  mesh.position.copy(G.player.pos);
+}
+
 export function updatePlayer(dt) {
-  const p = G.player;
-  const a = axis();
-  if (G.car) {
-    updatePlayerCar(dt, a.f, a.s);
-    if (wasPressed('KeyE') || G.touch.enterPressed) { G.touch.enterPressed = false; exitCar(); playBlip(520); }
-    p.mesh.visible = false;
-    updateCamera(dt);
-    return;
-  }
-  p.mesh.visible = true;
-  // Arah gerak relatif kamera: W = menjauhi kamera.
-  const run = G.keys.ShiftLeft || G.keys.ShiftRight;
-  const speed = run ? CFG.runSpeed : CFG.walkSpeed;
-  const cy = G.camYaw;
-  const fx = Math.sin(cy), fz = Math.cos(cy);
-  const rx = Math.cos(cy), rz = -Math.sin(cy);
-  let mx = fx * a.f + rx * a.s, mz = fz * a.f + rz * a.s;
-  const ml = Math.hypot(mx, mz);
-  if (ml > 0.01) {
-    mx /= ml; mz /= ml;
-    p.yaw = Math.atan2(mx, mz);
-    p.x += mx * speed * dt; p.z += mz * speed * dt;
-    p.speed = speed;
-    const ph = G.time * (run ? 13 : 9);
-    legL.rotation.x = Math.sin(ph) * 0.7; legR.rotation.x = -Math.sin(ph) * 0.7;
-    armL.rotation.x = -Math.sin(ph) * 0.5; armR.rotation.x = Math.sin(ph) * 0.5;
-  } else {
-    p.speed = 0;
-    legL.rotation.x *= 0.8; legR.rotation.x *= 0.8; armL.rotation.x *= 0.8; armR.rotation.x *= 0.8;
-  }
-  if (wasPressed('Space') && p.onGround) { p.vy = CFG.jumpV; p.onGround = false; }
-  if (!p.onGround) {
-    p.vy -= 22 * dt; p.y += p.vy * dt;
-    if (p.y <= 0) { p.y = 0; p.vy = 0; p.onGround = true; }
-  }
-  // Tabrakan gedung (lingkaran vs AABB).
-  for (const c of G.city.colliders) {
-    if (p.x > c.x0 - 0.5 && p.x < c.x1 + 0.5 && p.z > c.z0 - 0.5 && p.z < c.z1 + 0.5) {
-      const dxl = p.x - (c.x0 - 0.5), dxr = (c.x1 + 0.5) - p.x, dzl = p.z - (c.z0 - 0.5), dzr = (c.z1 + 0.5) - p.z;
-      const m = Math.min(dxl, dxr, dzl, dzr);
-      if (m === dxl) p.x = c.x0 - 0.5; else if (m === dxr) p.x = c.x1 + 0.5;
-      else if (m === dzl) p.z = c.z0 - 0.5; else p.z = c.z1 + 0.5;
+  const P = G.player;
+  const car = driveCarRef(); // guarded: null unless a real car object
+  if (pressed.KeyE || touch.enter) {
+    if (car) exitCar();
+    else if (G.interact) onInteract();
+    else {
+      const near = nearestCar(P.pos.x, P.pos.z, 4.5);
+      if (near) enterCar(near);
     }
   }
-  // Tabrakan mobil: pemain tidak bisa jalan menembus mobil (berhenti di sisinya).
-  for (const v of G.vehicles) {
-    const dx = p.x - v.x, dz = p.z - v.z, d = Math.hypot(dx, dz);
-    if (d < 2.6 && d > 0.01) { p.x = v.x + (dx / d) * 2.6; p.z = v.z + (dz / d) * 2.6; }
+  if (pressed.KeyH) sfx.horn();
+  if (pressed.KeyM) { import('./hud.js').then((h) => h.toggleMuteBtn()); }
+  const a = axis();
+  if (car) {
+    // driving: car is a proven object here; physics guards again inside.
+    const ctl = {
+      throttle: a.f,
+      steer: -a.s,
+      brake: !!(keys.KeyS && a.f < 0) || keys.Space || touch.brake,
+      hand: keys.ShiftLeft || keys.ShiftRight,
+    };
+    if (Math.abs(car.speed) > 18 && Math.abs(a.s) > 0.7) sfx.skid();
+    updateCarPhysics(car, dt, ctl);
+    P.pos.set(car.x, 0, car.z);
+    P.heading = car.heading;
+    P.speed = Math.abs(car.speed);
+    G.stats.distance += Math.abs(car.speed) * dt;
+    if (pressed.KeyC) G.camDist = G.camDist > 10 ? 7 : 13;
+  } else {
+    const run = keys.ShiftLeft || keys.ShiftRight;
+    const sp = (run ? CFG.run : CFG.walk) * (a.f !== 0 || a.s !== 0 ? 1 : 0);
+    const camA = G.camYaw;
+    const fx = Math.sin(camA), fz = Math.cos(camA);
+    let mx = (fx * a.f + fz * a.s), mz = (fz * a.f - fx * a.s);
+    const ml = Math.hypot(mx, mz);
+    if (ml > 0.01) {
+      mx /= ml; mz /= ml;
+      const nx = P.pos.x + mx * sp * dt, nz = P.pos.z + mz * sp * dt;
+      if (!collideCircle(nx, nz, 0.6)) { P.pos.x = nx; P.pos.z = nz; }
+      P.heading = Math.atan2(mx, mz);
+      P.speed = sp;
+      G.stats.distance += sp * dt;
+    } else P.speed = 0;
+    if (pressed.Space && P.grounded) { P.vy = CFG.jump; P.grounded = false; }
+    if (!P.grounded) {
+      P.vy -= CFG.grav * dt;
+      P.pos.y += P.vy * dt;
+      if (P.pos.y <= 0) { P.pos.y = 0; P.vy = 0; P.grounded = true; }
+    }
+    mesh.visible = true;
+    mesh.position.copy(P.pos);
+    mesh.rotation.y = P.heading;
+    const sw = Math.sin(G.elapsed * 11) * 0.55 * Math.min(1, P.speed / 6);
+    legL.rotation.x = sw; legR.rotation.x = -sw;
+    armL.rotation.x = -sw * 0.8; armR.rotation.x = sw * 0.8;
   }
-  p.x = clamp(p.x, -296, 296); p.z = clamp(p.z, -296, 296);
-  p.mesh.position.set(p.x, p.y, p.z);
-  p.mesh.rotation.y = p.yaw;
-  // Interaksi: E masuk mobil terdekat. Tekan selalu dikonsumsi (tap tanpa
-  // mobil di dekatnya tidak boleh nyangkut dan masuk mobil belakangan).
-  const near = nearestVehicle(p.x, p.z, 5);
-  G._nearCar = near;
-  if (wasPressed('KeyE') || G.touch.enterPressed) {
-    G.touch.enterPressed = false;
-    if (near) { enterCar(near); playBlip(660); }
-  }
+  // camera orbit: mouse (pointer lock) or touch drag
+  G.camYaw -= (mouse.dx * 0.0032 + touch.camDX * 0.006);
+  G.camPitch = Math.max(-1.1, Math.min(0.45, G.camPitch + mouse.dy * 0.0022 + touch.camDY * 0.005));
   updateCamera(dt);
 }
+
 export function updateCamera(dt) {
-  const p = G.player;
-  const cy = G.camYaw;
-  const tx = p.x - Math.sin(cy) * G.camDist;
-  const tz = p.z - Math.cos(cy) * G.camDist;
-  const ty = (G.car ? 4.2 : 3.2) + p.y;
-  G.camera.position.x += (tx - G.camera.position.x) * Math.min(1, dt * 8);
-  G.camera.position.y += (ty - G.camera.position.y) * Math.min(1, dt * 8);
-  G.camera.position.z += (tz - G.camera.position.z) * Math.min(1, dt * 8);
-  G.camera.lookAt(p.x, 1.4 + p.y, p.z);
-}
-export function distToMissionCar() {
-  const v = G.vehicles.find((x) => x.missionCar);
-  if (!v) return 999;
-  return Math.hypot(v.x - G.player.x, v.z - G.player.z);
+  const P = G.player;
+  const car = driveCarRef();
+  const target = car ? new THREE.Vector3(car.x, 1.6, car.z) : new THREE.Vector3(P.pos.x, 1.7, P.pos.z);
+  const yaw = car ? car.heading : G.camYaw;
+  const pitch = car ? -0.3 : G.camPitch;
+  const dist = G.camDist + (car ? 3 : 0);
+  const cx = target.x - Math.sin(yaw) * Math.cos(pitch) * dist;
+  const cz = target.z - Math.cos(yaw) * Math.cos(pitch) * dist;
+  const cy = target.y - Math.sin(pitch) * dist + 1.2;
+  G.camera.position.lerp(new THREE.Vector3(cx, Math.max(1.2, cy), cz), Math.min(1, dt * 10));
+  G.camera.lookAt(target);
 }

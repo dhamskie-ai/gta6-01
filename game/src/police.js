@@ -1,119 +1,159 @@
-// Wanted 0–5 + polisi (mobil, jalan kaki, helikopter) + callsign PCPD.
+// Wanted stars + PCPD response: patrol cars, foot police, helicopter at
+// 3+ stars, callsigns, flashing red/blue light bars. Heat cools when the
+// player stays unseen; Spray & Shine clears stars for cash.
 import * as THREE from 'three';
-import { G } from './config.js';
-import { clamp, pick } from './random.js';
-import { spawnVehicle } from './vehicles.js';
-const CALLSIGNS = ['PELICAN-11', 'GECKO-25', 'IBIS-43', 'TARPON-19', 'HERON-17', 'KESTREL-31', 'MARLIN-26', 'BARRACUDA-18', 'TAC-45', 'OSPREY-08'];
+import { G, CFG } from './config.js';
+import { R } from './random.js';
+import { makeCar, isCarObj, updateCarPhysics } from './vehicles.js';
+import { spawnPed } from './traffic.js';
+import { driveCarRef } from './player.js';
+import { sfx } from './audio.js';
+
+const CALLSIGNS = ['PELICAN-11', 'GECKO-25', 'IBIS-43', 'TARPON-19', 'HERON-17', 'KESTREL-31', 'MARLIN-26', 'BARRACUDA-18'];
 let seq = 0;
-export function addWanted(n, reason) {
-  G.wanted = clamp(G.wanted + n, 0, 5);
-  G.heat = 10;
-  if (reason) { G.toast = reason; G.toastT = 2.5; }
+
+export function setWanted(n) {
+  G.wanted = Math.max(0, Math.min(CFG.maxWanted, n));
+  G.heat = 0; G.hiddenT = 0;
 }
-export function buildHelicopter() {
+
+export function addWanted(n) { setWanted(G.wanted + n); }
+
+function spawnPoliceCar(x, z) {
+  const c = makeCar('police', x, z, 0);
+  c.callsign = CALLSIGNS[seq++ % CALLSIGNS.length];
+  c.role = 'PURSUIT';
+  c.kind = 'car';
+  G.police.push(c);
+  return c;
+}
+
+function spawnFootCop(x, z) {
+  const p = spawnPed(x, z, { color: 0x11151c, hat: 0x11151c });
+  p.kind = 'foot'; p.callsign = CALLSIGNS[seq++ % CALLSIGNS.length];
+  p.role = 'PATROL';
+  G.police.push(p);
+  return p;
+}
+
+export function policeUnits() {
+  // HUD list: cars + foot cops, nearest first, with role + distance.
+  const px = G.player.pos.x, pz = G.player.pos.z;
+  return G.police
+    .filter((u) => u && typeof u === 'object' && typeof u.x === 'number')
+    .map((u) => ({ name: u.callsign || 'PCPD', role: u.role || 'PURSUIT', d: Math.round(Math.hypot(u.x - px, u.z - pz)) }))
+    .sort((a, b) => a.d - b.d);
+}
+
+function ensureHeli() {
+  if (G.heli) return G.heli;
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x1a2e4a });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.8, 2.2), bodyMat); g.add(body);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.4, 2.25), new THREE.MeshLambertMaterial({ color: 0xf2f2f2 }));
-  stripe.position.y = 0.3; g.add(stripe);
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1, 2), new THREE.MeshLambertMaterial({ color: 0x9fd8e8, transparent: true, opacity: 0.8 }));
+  const bodyM = new THREE.MeshLambertMaterial({ color: 0x1e2a4a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.6, 1.8), bodyM);
+  g.add(body);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1, 1.6),
+    new THREE.MeshLambertMaterial({ color: 0x9fd8ef, transparent: true, opacity: 0.8 }));
   glass.position.set(2.2, 0.2, 0); g.add(glass);
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 5, 6), bodyMat);
-  boom.rotation.z = Math.PI / 2; boom.position.set(-4.2, 0.4, 0); g.add(boom);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.8, 1.2), bodyMat); fin.position.set(-6.4, 1, 0); g.add(fin);
-  const rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), new THREE.MeshLambertMaterial({ color: 0x222226 }));
-  rotor.position.y = 1.3; g.add(rotor);
-  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 0.4), new THREE.MeshLambertMaterial({ color: 0x222226 }));
-  tailRotor.position.set(-6.4, 1, 0.4); g.add(tailRotor);
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
-  beacon.position.y = -1.1; g.add(beacon);
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(5, 22, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xfff6c8, transparent: true, opacity: 0.14, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-  cone.position.y = -12; cone.rotation.x = Math.PI; g.add(cone);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.3, 1.85),
+    new THREE.MeshLambertMaterial({ color: 0xf2f2f2 }));
+  stripe.position.y = 0.4; g.add(stripe);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.5, 0.5), bodyM);
+  tail.position.set(-4, 0.4, 0); g.add(tail);
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  rotor.position.y = 1.1; g.add(rotor);
+  const tailR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 0.4), rotor.material);
+  tailR.position.set(-6, 0.5, 0); g.add(tailR);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
+  beacon.position.y = -1; g.add(beacon);
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(7, 26, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  cone.rotation.x = Math.PI; cone.position.y = -14; g.add(cone);
   g.visible = false;
   G.scene.add(g);
-  G.heli = { mesh: g, rotor, tailRotor, beacon, cone, angle: 0 };
+  G.heli = { group: g, rotor, beacon, ang: 0 };
+  return G.heli;
 }
+
 export function updatePolice(dt) {
-  // Heat turun bila jauh dari polisi; wanted hilang setelah bersembunyi.
-  const px = G.player.x, pz = G.player.z;
-  let nearest = 999;
-  for (const c of G.police) nearest = Math.min(nearest, Math.hypot(c.x - px, c.z - pz));
-  if (G.wanted > 0) {
-    if (nearest > 40) { G.heat -= dt; if (G.heat <= 0) { G.wanted = 0; G.toast = 'Lolos dari kejaran PCPD'; G.toastT = 2; } }
-    else G.heat = 10;
+  const want = G.wanted;
+  const targetN = want === 0 ? 0 : want === 1 ? 2 : want + 1;
+  // spawn / despawn to match wanted level
+  const cars = G.police.filter((u) => u && u.kind === 'car');
+  const feet = G.police.filter((u) => u && u.kind === 'foot');
+  if (want >= 1 && feet.length < Math.min(2, want)) {
+    spawnFootCop(G.player.pos.x + R.range(-18, 18), G.player.pos.z + R.range(-18, 18));
   }
-  // Jumlah polisi mengikuti bintang.
-  const wantCars = G.wanted >= 2 ? Math.min(4, G.wanted) : 0;
-  const wantFoot = G.wanted >= 1 ? Math.min(3, G.wanted) : 0;
-  while (G.police.filter((c) => c.kind === 'car').length < wantCars) {
-    const a = Math.random() * Math.PI * 2;
-    const c = spawnVehicle('police', px + Math.sin(a) * 45, pz + Math.cos(a) * 45, a, { callsign: CALLSIGNS[seq++ % CALLSIGNS.length] });
-    c.kind = 'car'; G.police.push(c);
+  if (cars.length < targetN) {
+    const a = R.range(0, Math.PI * 2);
+    spawnPoliceCar(G.player.pos.x + Math.sin(a) * 55, G.player.pos.z + Math.cos(a) * 55);
   }
-  while (G.police.filter((c) => c.kind === 'foot').length < wantFoot) {
-    const a = Math.random() * Math.PI * 2;
-    const f = { kind: 'foot', x: px + Math.sin(a) * 18, z: pz + Math.cos(a) * 18, speed: 5.5, mesh: null, callsign: CALLSIGNS[seq++ % CALLSIGNS.length] };
-    const m = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.35), new THREE.MeshLambertMaterial({ color: 0x1a2e6e }));
-    b.position.y = 1; m.add(b);
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), new THREE.MeshLambertMaterial({ color: 0xe0ac69 }));
-    h.position.y = 1.65; m.add(h);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.4), new THREE.MeshLambertMaterial({ color: 0x0a0a0a }));
-    cap.position.y = 1.85; m.add(cap);
-    m.position.set(f.x, 0, f.z); G.scene.add(m); f.mesh = m;
-    G.police.push(f);
-  }
-  // Hapus kelebihan bila wanted turun.
-  while (G.police.filter((c) => c.kind === 'car').length > wantCars) {
-    const i = G.police.findIndex((c) => c.kind === 'car');
-    const c = G.police[i]; G.scene.remove(c.mesh); G.vehicles.splice(G.vehicles.indexOf(c), 1); G.police.splice(i, 1);
-  }
-  while (G.police.filter((c) => c.kind === 'foot').length > wantFoot) {
-    const i = G.police.findIndex((c) => c.kind === 'foot');
-    const c = G.police[i]; G.scene.remove(c.mesh); G.police.splice(i, 1);
-  }
-  // AI kejar: mobil belok ke arah pemain, pejalan kaki berlari ke pemain.
-  for (const c of G.police) {
-    const dx = px - c.x, dz = pz - c.z, d = Math.hypot(dx, dz) || 1;
-    c.role = d < 12 ? 'RAMMING' : d < 30 ? 'PURSUIT' : 'ROADBLOCK';
-    if (c.kind === 'car') {
-      const want = Math.atan2(dx, dz);
-      let diff = want - c.heading;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      c.heading += clamp(diff, -1.8 * dt, 1.8 * dt);
-      c.speed = Math.min(c.top, c.speed + 14 * dt);
-      c.x += Math.sin(c.heading) * c.speed * dt; c.z += Math.cos(c.heading) * c.speed * dt;
-      c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = c.heading;
-      const flash = Math.sin(G.time * 12) > 0;
-      if (c.mesh.userData.barR) { c.mesh.userData.barR.material.color.setHex(flash ? 0xff2020 : 0x550000); c.mesh.userData.barB.material.color.setHex(flash ? 0x550000 : 0x2040ff); }
-      for (const w of c.mesh.userData.wheels) w.rotation.x += c.speed * dt * 2;
-      if (d < 3.5) { // ditangkap
-        if (G.car) { G.car.speed *= 0.5; }
-        G.health -= 12 * dt;
+  const px = G.player.pos.x, pz = G.player.pos.z;
+  const pc = driveCarRef();
+  const pspeed = pc ? Math.abs(pc.speed) : G.player.speed;
+  for (const u of [...G.police]) {
+    if (!u || typeof u !== 'object') continue;
+    const d = Math.hypot(u.x - px, u.z - pz);
+    u.role = d < 14 ? 'RAMMING' : (u.kind === 'foot' ? 'PATROL' : 'PURSUIT');
+    if (u.kind === 'car') {
+      if (!isCarObj(u)) continue;
+      const want2 = Math.atan2(px - u.x, pz - u.z);
+      let dh = want2 - u.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      const steer = Math.max(-1, Math.min(1, dh * 1.6));
+      updateCarPhysics(u, dt, { throttle: d > 6 ? 1 : 0.4, steer, brake: false, hand: false });
+      // ram: bump the player car when close
+      if (pc && d < 4.5 && !G.shotMode) {
+        pc.speed *= 0.92; pc.hp -= 0.2;
+        if (Math.random() < dt * 2) sfx.skid();
       }
+      // flashing light bar: alternate red/blue
+      const on = Math.floor(G.elapsed * 6) % 2 === 0;
+      if (u.barL) u.barL.material.color.setHex(on ? 0xff2020 : 0x550000);
+      if (u.barR) u.barR.material.color.setHex(on ? 0x000055 : 0x2050ff);
+      if (d > 260) { G.scene.remove(u.group); G.police.splice(G.police.indexOf(u), 1); }
     } else {
-      c.x += (dx / d) * c.speed * dt; c.z += (dz / d) * c.speed * dt;
-      c.mesh.position.set(c.x, 0, c.z); c.mesh.rotation.y = Math.atan2(dx, dz);
-      if (d < 1.6) G.health -= 10 * dt;
+      // foot cop: chase on foot, punch when adjacent
+      const want2 = Math.atan2(px - u.x, pz - u.z);
+      u.heading = want2;
+      const sp = d > 2 ? 5.2 : 0;
+      u.x += Math.sin(u.heading) * sp * dt;
+      u.z += Math.cos(u.heading) * sp * dt;
+      u.group.position.set(u.x, 0, u.z);
+      u.group.rotation.y = u.heading;
+      if (d < 1.6 && !G.shotMode) {
+        G.health -= 14 * dt;
+        if (Math.random() < dt * 1.5) sfx.punch();
+      }
+      if (d > 160) { G.scene.remove(u.group); G.peds.splice(G.peds.indexOf(u), 1); G.police.splice(G.police.indexOf(u), 1); }
     }
   }
-  // Helikopter di wanted >= 3.
-  if (G.heli) {
-    const h = G.heli;
-    h.mesh.visible = G.wanted >= 3;
-    if (h.mesh.visible) {
-      h.angle += dt * 0.25;
-      h.mesh.position.set(px + Math.cos(h.angle) * 30, 26 + Math.sin(G.time * 0.5) * 2, pz + Math.sin(h.angle) * 30);
-      h.mesh.rotation.y = -h.angle;
-      h.rotor.rotation.y += dt * 18; h.tailRotor.rotation.x += dt * 22;
-      h.beacon.material.color.setHex(Math.sin(G.time * 6) > 0 ? 0xff2020 : 0x330000);
+  // helicopter at 3+ stars, orbiting the player
+  const heli = ensureHeli();
+  if (want >= 3 && G.phase === 'play') {
+    heli.group.visible = true;
+    heli.ang += dt * 0.25;
+    heli.group.position.set(px + Math.cos(heli.ang) * 30, 26 + Math.sin(G.elapsed * 0.7) * 2, pz + Math.sin(heli.ang) * 30);
+    heli.group.rotation.y = -heli.ang;
+    heli.rotor.rotation.y += dt * 22;
+    heli.beacon.material.color.setHex(Math.floor(G.elapsed * 3) % 2 ? 0xff2020 : 0x550000);
+  } else heli.group.visible = false;
+  // heat: cools when the player is far from every unit; hides fully after 20 s
+  if (want > 0) {
+    const nearest = G.police.reduce((m, u) => Math.min(m, (u && typeof u.x === 'number') ? Math.hypot(u.x - px, u.z - pz) : 999), 999);
+    if (nearest > 45) {
+      G.hiddenT += dt;
+      if (G.hiddenT > CFG.hideCool) { setWanted(0); }
+      else if (G.hiddenT > CFG.heatCool && pspeed < 2) setWanted(want - 1);
+    } else G.hiddenT = 0;
+  }
+  // Spray & Shine: drive through to clear stars for cash
+  if (want > 0) {
+    const dx = px - CFG.spray.x, dz = pz - CFG.spray.z;
+    if (dx * dx + dz * dz < 100 && G.cash >= CFG.respray * want) {
+      G.cash -= CFG.respray * want;
+      setWanted(0);
+      sfx.coin();
     }
   }
-  // Di scene shot yang dipentaskan (?shot=) tidak ada game-over: polisi
-  // tetap mengejar dan menabrak, tapi layar DITANGKAP tidak boleh menutupi
-  // shot. Di permainan normal G.shot kosong dan bust jalan seperti biasa.
-  if (G.health <= 0 && !G.shot) { G.state = 'busted'; G.stats.busted++; }
 }
-export function policeList() { return G.police.map((c) => ({ callsign: c.callsign, role: c.role || 'PURSUIT', d: Math.round(Math.hypot(c.x - G.player.x, c.z - G.player.z)) })); }

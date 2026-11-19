@@ -1,33 +1,52 @@
-// Keyboard + mouse drag. Edge-trigger via pressed set (konsumsi sekali).
+// Keyboard + mouse + pointer lock. Touch (touch.js) writes into the same
+// Input.touch object, so gameplay reads one input source either way.
 import { G } from './config.js';
-const pressed = new Set();
-export function initInput() {
+
+export const keys = {};
+export const pressed = {}; // edge-triggered: true only on the frame of keydown
+export const mouse = { dx: 0, dy: 0, down: false, locked: false };
+export const touch = {
+  active: false, moveX: 0, moveY: 0, // joystick -1..1
+  enter: false, brake: false, cam: false, camDX: 0, camDY: 0,
+  shoot: false, action: false,
+};
+
+export function initInput(canvas) {
   addEventListener('keydown', (e) => {
-    if (e.code === 'Tab') e.preventDefault();
-    if (!e.repeat) pressed.add(e.code);
-    G.keys[e.code] = true;
-    if (e.code === 'KeyM') G.muted = !G.muted;
+    if (e.repeat) return;
+    keys[e.code] = true; pressed[e.code] = true;
+    if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
   });
-  addEventListener('keyup', (e) => { G.keys[e.code] = false; });
-  addEventListener('blur', () => { G.keys = {}; });
-  let dragging = false, lx = 0;
-  const cv = document.getElementById('c');
-  cv.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; });
-  addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    G.camYaw -= (e.clientX - lx) * 0.005; lx = e.clientX;
+  addEventListener('keyup', (e) => { keys[e.code] = false; });
+  addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+  canvas.addEventListener('click', () => {
+    if (G.phase === 'play' && !G.touchMode && !mouse.locked) canvas.requestPointerLock?.();
   });
-  addEventListener('pointerup', () => { dragging = false; });
-  addEventListener('wheel', (e) => { G.camDist = Math.max(5, Math.min(16, G.camDist + Math.sign(e.deltaY))); }, { passive: true });
+  document.addEventListener('pointerlockchange', () => {
+    mouse.locked = document.pointerLockElement === canvas;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!mouse.locked) return;
+    mouse.dx += e.movementX; mouse.dy += e.movementY;
+  });
+  canvas.addEventListener('mousedown', (e) => { if (e.button === 0) mouse.down = true; });
+  addEventListener('mouseup', (e) => { if (e.button === 0) mouse.down = false; });
+  addEventListener('wheel', (e) => {
+    G.camDist = Math.max(5, Math.min(16, G.camDist + (e.deltaY > 0 ? 1 : -1)));
+  }, { passive: true });
 }
-export function wasPressed(code) { if (pressed.has(code)) { pressed.delete(code); return true; } return false; }
-export function clearPressed() { pressed.clear(); }
+
+export function endFrame() {
+  for (const k in pressed) pressed[k] = false;
+  mouse.dx = 0; mouse.dy = 0;
+  touch.camDX = 0; touch.camDY = 0;
+  touch.enter = false; touch.action = false;
+}
+
 export function axis() {
-  let f = 0, s = 0;
-  if (G.keys.KeyW || G.keys.ArrowUp) f += 1;
-  if (G.keys.KeyS || G.keys.ArrowDown) f -= 1;
-  if (G.keys.KeyA || G.keys.ArrowLeft) s -= 1;
-  if (G.keys.KeyD || G.keys.ArrowRight) s += 1;
-  if (G.touch.active) { f += -G.touch.joyY; s += G.touch.joyX; }
+  // -1..1 forward/strafe from keys or touch joystick.
+  let f = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  let s = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  if (touch.active) { f += -touch.moveY; s += touch.moveX; }
   return { f: Math.max(-1, Math.min(1, f)), s: Math.max(-1, Math.min(1, s)) };
 }
