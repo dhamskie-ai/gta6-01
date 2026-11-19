@@ -1,162 +1,115 @@
+// SOLARA BAY — deterministic screenshot scenes (?shot=chase|drive|street|
+// night&seed=1). Each scene stages the player, cars, police, wanted level,
+// time of day and mission, then waits a few frames and sets
+// window.__shotReady so the capture tool knows the frame is settled.
+// Cover (chase) shows the most systems at once: pursuit, wanted stars,
+// minimap, mission marker, speed, traffic, the Spires.
 import { CFG } from './config.js';
 import { makeCar } from './vehicles.js';
-import { placePlayer, syncPlayerToCar } from './player.js';
+import { placePlayer, syncPlayerToCar, updateCamera } from './player.js';
 import { startMission } from './missions.js';
 
-function setCar(G, type, x, z, heading, speed) {
-  if (G.car) { G.W.scene.remove(G.car.group); }
-  const car = makeCar(type, x, z, heading, undefined, true);
-  car.speed = speed || 0;
-  car.isPlayer = true;
+function addChaseCar(G, type, x, z, heading, color) {
+  const car = makeCar(type, x, z, heading, color, false);
+  car.traffic = true;
   G.W.scene.add(car.group);
-  G.car = car;
-  G.inCar = true;
-  G.player.mesh.visible = false;
-  syncPlayerToCar(G);
+  G.traffic.push({ car, kind: 'traffic' });
   return car;
-}
-
-function setOnFoot(G, x, z, heading) {
-  if (G.car) { G.W.scene.remove(G.car.group); G.car = null; }
-  G.inCar = false;
-  G.player.mesh.visible = true;
-  placePlayer(G, x, z, heading || 0);
 }
 
 export function applyShot(G, name) {
   G.shotMode = true;
-  G.shotName = name;
   G.phase = 'play';
-  G._shotWantedLock = true;
-  G._shotPlaced = false;
-  G._shotFrames = 0;
-  if (G.hud) G.hud.setPhase('play');
-  G.enemies = [];
   if (name === 'chase') {
-    G.timeOfDay = 18.4;
-    G.day = 1;
-    setCar(G, 'veloce', 0, 30, 0, 26);
+    // Golden-hour downtown pursuit: player in the pink VELOZ, 2 PCPD cars
+    // closing in, wanted 3, mission 8 beacon on the minimap.
+    G.timeOfDay = 17.8;
+    placePlayer(G, 0, 40, Math.PI);
+    const hero = makeCar('veloce', 0, 36, Math.PI, 0xff2e7e, true);
+    G.W.scene.add(hero.group);
+    G.car = hero; G.inCar = true;
+    syncPlayerToCar(G);
+    const p1 = makeCar('police', -6, 20, Math.PI, undefined, true);
+    G.W.scene.add(p1.group);
+    G.policeCars.push({ car: p1, callsign: 'PELICAN-11' });
+    const p2 = makeCar('police', 7, 52, Math.PI, undefined, true);
+    G.W.scene.add(p2.group);
+    G.policeCars.push({ car: p2, callsign: 'GECKO-25' });
+    addChaseCar(G, 'cometa', -4, 60, 0, 0x3f6fb5);
+    addChaseCar(G, 'cabro', 5, 12, Math.PI, 0xf2c200);
+    G.cash = 86250;
+    startMission(G, 7);
     G.wanted = 3;
-    G.cash = 38420;
-    G.missionIndex = 2; G.missionStage = 1;
-    startMission(G, 2);
-    G.missionStage = 1;
-    G.missionTarget = { x: 0, z: 120, r: 7, label: 'Antar paket 2/3 — Old Solara' };
-    if (G.hud) G.hud.showObjective('Antar paket 2/3 — Old Solara');
+    G.missionTimer = 107;
   } else if (name === 'drive') {
-    G.timeOfDay = 17.6;
-    G.day = 1;
-    setCar(G, 'veloce', -240, -40, 0, 22);
+    // Golden hour on the Malecón: sport car on the coast road, traffic,
+    // pedestrians on the boardwalk, sea + sunset sky, palms.
+    G.timeOfDay = 17.4;
+    placePlayer(G, -238, 30, 0);
+    const hero = makeCar('veloce', -238, 34, 0, 0xff2e7e, true);
+    G.W.scene.add(hero.group);
+    G.car = hero; G.inCar = true;
+    syncPlayerToCar(G);
+    addChaseCar(G, 'cometa', -238, 60, 0, 0x3f6fb5);
+    addChaseCar(G, 'pip', -234, 8, Math.PI, 0xe8b93a);
+    addChaseCar(G, 'cabro', -238, 90, 0, 0xf2c200);
     G.wanted = 0;
     G.cash = 10350;
-    G.missionIndex = 2; G.missionStage = 0;
-    startMission(G, 2);
-    G.missionStage = 0;
-    G.missionTarget = { x: 120, z: 120, r: 7, label: 'Antar paket 1/3 — The Spires' };
+    startMission(G, 1);
   } else if (name === 'street') {
+    // Midday in Old Solara: Nico on foot in the market street, pedestrians
+    // around, Marco + mission marker, "E — Bicara" prompt.
     G.timeOfDay = 12.0;
-    G.day = 1;
-    setOnFoot(G, -60, 120, Math.PI);
+    placePlayer(G, -236, 84, -0.93);
     G.wanted = 0;
     G.cash = 10350;
-    G.weapon = 2;
-    G.missionIndex = 0; G.missionStage = 0;
-    startMission(G, 0);
-    G.missionStage = 0;
-    G.missionTarget = { x: -232, z: 70, r: 6, label: 'Curi VELOZ COMET RS di Malecón' };
-    G._promptText = 'E — Bicara';
+    G.weapon = 1;
+    startMission(G, 1);
+    G._promptText = 'E — Bicara dengan Marco';
   } else if (name === 'night') {
+    // Night at Marina Bay: neon signs, headlights on, wanted 1, the pier
+    // and ferris wheel behind, minimap at night.
     G.timeOfDay = 21.5;
-    G.day = 1;
-    setCar(G, 'veloce', -230, 60, 0, 14);
+    placePlayer(G, -238, 120, 0);
+    const hero = makeCar('cometa', -238, 124, 0, 0x3f6fb5, true);
+    G.W.scene.add(hero.group);
+    G.car = hero; G.inCar = true;
+    syncPlayerToCar(G);
+    const p1 = makeCar('police', -238, 100, 0, undefined, true);
+    G.W.scene.add(p1.group);
+    G.policeCars.push({ car: p1, callsign: 'BARRACUDA-18' });
     G.wanted = 1;
-    G.cash = 24800;
-    G.missionIndex = 4; G.missionStage = 0;
+    G.cash = 10350;
     startMission(G, 4);
-    G.missionStage = 0;
-    G.timeOfDay = 21.5; // startMission(3) does not force night; keep staged night
-    G.missionTarget = { x: 0, z: 0, r: 45, label: 'Buntuti kurir Dario (jaga jarak 12–45 m)' };
-  } else if (name === 'harbor') {
-    G.timeOfDay = 19.0;
-    G.day = 1;
-    setOnFoot(G, -250, 84, -Math.PI / 2);
-    G.wanted = 0;
-    G.cash = 15200;
-    G.missionIndex = 6; G.missionStage = 0;
-    startMission(G, 6);
-    G.missionStage = 0;
-    G.missionTarget = { x: CFG.lighthouse.x, z: CFG.lighthouse.z, r: 9, label: 'Ke mercusuar' };
+    // Keep the tail courier near the player so the staged scene never
+    // trips the "courier escaped" fail while the shot settles.
+    if (G._chaseCar) {
+      G._chaseCar.x = -210; G._chaseCar.z = 120;
+      G._chaseCar.group.position.set(-210, 0, 120);
+      G._courierRoute = { x: -180, z: 120 };
+    }
   } else {
-    G.timeOfDay = 17.0;
-    setOnFoot(G, CFG.playerStart.x, CFG.playerStart.z, 0);
-    startMission(G, 0);
+    G.timeOfDay = 12.0;
+    placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
   }
-  if (name === 'chase') G.wanted = 3;
-  if (name === 'night') G.wanted = 1;
-  if (name === 'drive' || name === 'street' || name === 'harbor') G.wanted = 0;
+  G.player.camYaw = G.inCar && G.car ? G.car.heading + Math.PI : G.player.heading + Math.PI;
+  G.player.camDist = G.inCar ? 10 : 6.5;
+  // Snap the chase camera to its staged position at once: at ~2 fps the
+  // normal lerp would still be travelling (through buildings) when the
+  // capture fires 8 frames in.
+  updateCamera(G, 1);
+  window.__shotReady = false;
+  G._shotFrames = 0;
 }
 
 export function tickShot(G) {
   if (!G.shotMode) return;
-  G._shotFrames++;
-  const px = G.player.x, pz = G.player.z;
-  const fx = Math.sin(G.player.heading), fz = Math.cos(G.player.heading);
-  if (!G._shotPlaced) {
-    if (G.shotName === 'chase') {
-      if (G.policeCars.length >= 2) {
-        G.policeCars.slice(0, 2).forEach((pc, i) => {
-          if (i === 0) {
-            pc.car.x = px + fx * 18 + 3.2 * fz;
-            pc.car.z = pz + fz * 18 - 3.2 * fx;
-          } else {
-            pc.car.x = px - fx * 20 + 3.5 * fz;
-            pc.car.z = pz - fz * 20 - 3.5 * fx;
-          }
-          pc.car.heading = G.player.heading;
-          pc.car.speed = 24;
-        });
-        G._shotPlaced = true;
-      }
-      G.traffic.slice(0, 3).forEach((t, i) => {
-        t.car.x = px + fx * (26 + i * 16) + (i % 2 ? 2.2 : -2.2) * fz;
-        t.car.z = pz + fz * (26 + i * 16) - (i % 2 ? 2.2 : -2.2) * fx;
-        t.car.heading = G.player.heading;
-        t.car.speed = 10;
-        t.axis = 'z'; t.line = 0; t.dir = 1;
-      });
-    } else if (G.shotName === 'drive') {
-      G.traffic.slice(0, 3).forEach((t, i) => {
-        t.car.x = -240 + (i % 2 ? 2.2 : -2.2);
-        t.car.z = -40 + 30 + i * 18;
-        t.car.heading = 0;
-        t.car.speed = 10;
-        t.axis = 'z'; t.line = -240; t.dir = 1;
-      });
-      G.peds.slice(0, 4).forEach((p, i) => {
-        p.x = -249; p.z = -30 + i * 9; p.axis = 'z'; p.dir = 1;
-      });
-      G._shotPlaced = true;
-    } else if (G.shotName === 'street') {
-      G.peds.slice(0, 6).forEach((p, i) => {
-        p.x = -60 + (i % 3 - 1) * 5;
-        p.z = 120 + (Math.floor(i / 3) - 0.5) * 12 + i * 2;
-        p.axis = 'x'; p.dir = i % 2 ? 1 : -1;
-      });
-      G._shotPlaced = true;
-    } else if (G.shotName === 'night') {
-      G.traffic.slice(0, 2).forEach((t, i) => {
-        t.car.x = -240 + (i % 2 ? 2.2 : -2.2);
-        t.car.z = 60 + 24 + i * 16;
-        t.car.heading = 0;
-        t.car.speed = 9;
-        t.axis = 'z'; t.line = -240; t.dir = 1;
-      });
-      G._shotPlaced = true;
-    } else {
-      G._shotPlaced = true;
+  G._shotFrames = (G._shotFrames || 0) + 1;
+  // Let the camera settle and the sky/birds animate a few frames in.
+  if (G._shotFrames === 3) {
+    if (G.inCar && G.car) {
+      G.car.speed = 14;
     }
   }
-  if (G._shotFrames > 4 && !window.__shotReady) {
-    window.__shotReady = true;
-  }
+  if (G._shotFrames >= 8) window.__shotReady = true;
 }

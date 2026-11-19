@@ -1,3 +1,5 @@
+// SOLARA BAY — tuning & data tables. All names, places and prices are
+// original fiction for this game; no real-world brands are referenced.
 export const CFG = {
   seed: 1,
   worldHalf: 300,
@@ -19,6 +21,7 @@ export const CFG = {
   playerStart: { x: -232, z: 64 },
   trafficCount: 20,
   pedCount: 36,
+  birdCount: 14,
   parkedCount: 16,
   walkSpeed: 5.2,
   runSpeed: 9.5,
@@ -76,14 +79,14 @@ export const SHOP_SIGNS = [
 ];
 
 export const NEON_SIGNS = [
-  { text: 'FLAMINGO FM', color: '#ff5fa2', x: -226, z: 30, face: 'E' },
-  { text: 'VICE HOTEL', color: '#37e0ff', x: -226, z: -30, face: 'E' },
-  { text: 'TACOS 24H', color: '#ffd23f', x: 118, z: -118, face: 'S' },
-  { text: 'CELESTE 98.1', color: '#ff8fd6', x: -226, z: 150, face: 'E' },
-  { text: 'MARLIN CEVICHE', color: '#7de3ff', x: -226, z: 96, face: 'E' },
   { text: 'SOLARA BAY', color: '#ffb347', x: 0, z: -118, face: 'S' },
+  { text: 'MARLIN CEVICHE', color: '#7de3ff', x: -226, z: 96, face: 'E' },
+  { text: 'CELESTE 98.1', color: '#ff8fd6', x: -226, z: 150, face: 'E' },
   { text: 'SPRAY & SHINE', color: '#8dff9e', x: 118, z: 118, face: 'S' },
+  { text: 'TACOS 24H', color: '#ffd23f', x: 118, z: -118, face: 'S' },
   { text: 'CAL’S GUNS', color: '#ff9d5c', x: 118, z: -118, face: 'N' },
+  { text: 'VICE HOTEL', color: '#37e0ff', x: -226, z: -30, face: 'E' },
+  { text: 'FLAMINGO FM', color: '#ff5fa2', x: -226, z: 30, face: 'E' },
 ];
 
 export const PED_NAMES = [

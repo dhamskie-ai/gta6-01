@@ -1,37 +1,38 @@
+// SOLARA BAY — keyboard + mouse input with edge detection and pointer
+// lock. The game loop reads `pressed` once per frame, then endFrame clears
+// the edge sets so a single keypress never fires twice.
 export function createInput(canvas) {
   const inp = {
-    keys: new Set(),
-    pressed: new Set(),
-    buttons: new Set(),
-    pressedBtn: new Set(),
-    mouseDX: 0,
-    mouseDY: 0,
-    wheel: 0,
-    locked: false,
-    canvas,
+    keys: new Set(), pressed: new Set(),
+    buttons: new Set(), pressedBtn: new Set(),
+    dx: 0, dy: 0, wheel: 0, locked: false, canvas,
   };
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     inp.keys.add(e.code);
     inp.pressed.add(e.code);
-    if (e.code === 'Space') e.preventDefault();
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   });
-  window.addEventListener('keyup', (e) => { inp.keys.delete(e.code); });
+  window.addEventListener('keyup', (e) => inp.keys.delete(e.code));
   window.addEventListener('blur', () => { inp.keys.clear(); inp.buttons.clear(); });
-  document.addEventListener('mousemove', (e) => {
-    if (!inp.locked) return;
-    inp.mouseDX += e.movementX || 0;
-    inp.mouseDY += e.movementY || 0;
-  });
-  document.addEventListener('mousedown', (e) => {
+  canvas.addEventListener('mousedown', (e) => {
     inp.buttons.add(e.button);
     inp.pressedBtn.add(e.button);
+    if (!inp.locked && document.pointerLockElement !== canvas) {
+      canvas.requestPointerLock?.();
+    }
   });
-  document.addEventListener('mouseup', (e) => { inp.buttons.delete(e.button); });
-  document.addEventListener('wheel', (e) => { inp.wheel += e.deltaY; }, { passive: true });
+  window.addEventListener('mouseup', (e) => inp.buttons.delete(e.button));
   document.addEventListener('pointerlockchange', () => {
     inp.locked = document.pointerLockElement === canvas;
   });
+  document.addEventListener('mousemove', (e) => {
+    if (!inp.locked) return;
+    inp.dx += e.movementX || 0;
+    inp.dy += e.movementY || 0;
+  });
+  canvas.addEventListener('wheel', (e) => { inp.wheel += e.deltaY; e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   return inp;
 }
 
@@ -41,9 +42,9 @@ export function wasClicked(inp, btn) { return inp.pressedBtn.has(btn); }
 export function isMouseDown(inp, btn) { return inp.buttons.has(btn); }
 
 export function consumeMouse(inp) {
-  const dx = inp.mouseDX, dy = inp.mouseDY;
-  inp.mouseDX = 0; inp.mouseDY = 0;
-  return { dx, dy };
+  const out = { dx: inp.dx, dy: inp.dy };
+  inp.dx = 0; inp.dy = 0;
+  return out;
 }
 
 export function consumeWheel(inp) {
@@ -58,9 +59,5 @@ export function endFrame(inp) {
 }
 
 export function requestLock(inp) {
-  try {
-    if (!inp.locked && inp.canvas && inp.canvas.requestPointerLock) {
-      inp.canvas.requestPointerLock();
-    }
-  } catch (err) { /* pointer lock unavailable headless; camera still works */ }
+  if (document.pointerLockElement !== inp.canvas) inp.canvas.requestPointerLock?.();
 }

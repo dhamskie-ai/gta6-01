@@ -1,16 +1,44 @@
+// SOLARA BAY — renderer: scene, sky dome, sun/moon, clouds, birds,
+// particles, tracers and muzzle flashes. Sharpness rules (round 6f):
+// pixelRatio min(dpr,2) + antialias on real hardware, fog pushed far
+// (220–1100 m) so mid-distance buildings stay crisp, and every sky
+// element is drawn with hard edges instead of stretched blur sprites.
 import * as THREE from 'three';
 import { nightFactor } from './city.js';
 
-function radialSpriteTexture() {
+// Soft round glow (only used for small glows, never stretched huge).
+function glowTexture() {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.4, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
+}
+
+// Puffy cloud texture: several hard-edged lobes on a 256px canvas, so a
+// cloud sprite keeps visible shape instead of one blurred blob.
+function cloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  const lobes = [[70, 84, 46], [120, 66, 58], [178, 80, 48], [205, 92, 30], [100, 92, 40], [150, 94, 42]];
+  for (const [x, y, r] of lobes) {
+    const grad = g.createRadialGradient(x, y, r * 0.15, x, y, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grad.addColorStop(0.75, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = 'rgba(255,255,255,0.9)';
+  g.fillRect(52, 88, 156, 22);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 const SKY_KEYS = [
@@ -48,20 +76,19 @@ export function createWorld(container) {
     software = /swiftshader|llvmpipe|softpipe|software/i.test(str);
     if (tgl) { const lose = tgl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); }
   } catch (err) { /* detection unavailable; assume hardware */ }
-  const renderer = new THREE.WebGLRenderer({ antialias: !software, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, software ? 1 : 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = !software;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  if (software) { renderer.shadowMap.enabled = false; renderer.setPixelRatio(1); }
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x8fc3e8, 120, 700);
-  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1500);
+  scene.fog = new THREE.Fog(0x8fc3e8, 220, 1100);
+  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
   camera.position.set(0, 6, -10);
 
   const skyMat = new THREE.ShaderMaterial({
@@ -83,7 +110,7 @@ export function createWorld(container) {
 
   const sun = new THREE.DirectionalLight(0xffffff, 2.0);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
   sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
   sun.shadow.camera.far = 400;
@@ -93,23 +120,55 @@ export function createWorld(container) {
   const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x8a7a5a, 1.0);
   scene.add(hemi);
 
-  const glowTex = radialSpriteTexture();
+  const glowTex = glowTexture();
+  // Sharp sun disc: hard-edged circle mesh + a modest glow halo.
+  const sunDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(34, 40),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c8, fog: false, depthWrite: false, depthTest: false, transparent: true, opacity: 0.95 }),
+  );
+  sunDisc.renderOrder = -1;
+  scene.add(sunDisc);
   const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTex, color: 0xffb347, transparent: true, opacity: 0.3,
     blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
   }));
-  sunGlow.scale.set(260, 260, 1);
+  sunGlow.scale.set(220, 220, 1);
   scene.add(sunGlow);
+  // Moon: pale hard disc visible at night, opposite the sun.
+  const moon = new THREE.Mesh(
+    new THREE.CircleGeometry(22, 32),
+    new THREE.MeshBasicMaterial({ color: 0xe8ecf5, fog: false, depthWrite: false, depthTest: false, transparent: true, opacity: 0 }),
+  );
+  moon.renderOrder = -1;
+  scene.add(moon);
 
+  const cloudTex = cloudTexture();
   const clouds = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 11; i++) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTex, color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false,
+      map: cloudTex, color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false,
     }));
-    s.position.set((Math.random() - 0.5) * 700, 110 + Math.random() * 60, (Math.random() - 0.5) * 700);
-    s.scale.set(120 + Math.random() * 120, 26 + Math.random() * 20, 1);
+    s.position.set((Math.random() - 0.5) * 700, 120 + Math.random() * 70, (Math.random() - 0.5) * 700);
+    s.scale.set(90 + Math.random() * 110, 34 + Math.random() * 22, 1);
     scene.add(s);
     clouds.push({ s, speed: 0.6 + Math.random() * 0.9 });
+  }
+  // Puffy mesh clouds: clusters of flat-shaded spheres, crisp silhouette.
+  const puffMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  const puffs = [];
+  for (let i = 0; i < 5; i++) {
+    const grp = new THREE.Group();
+    const n = 4 + Math.floor(Math.random() * 3);
+    for (let j = 0; j < n; j++) {
+      const r = 14 + Math.random() * 16;
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), puffMat);
+      m.position.set((j - n / 2) * 22 + Math.random() * 8, Math.random() * 8, Math.random() * 10 - 5);
+      m.scale.y = 0.55;
+      grp.add(m);
+    }
+    grp.position.set((Math.random() - 0.5) * 600, 130 + Math.random() * 60, (Math.random() - 0.5) * 600);
+    scene.add(grp);
+    puffs.push({ grp, speed: 0.5 + Math.random() * 0.8 });
   }
 
   const starCount = 500;
@@ -127,6 +186,32 @@ export function createWorld(container) {
   const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0 });
   const stars = new THREE.Points(starGeo, starsMat);
   scene.add(stars);
+
+  // Ambient birds: flapping two-triangle wings, flying slow circles.
+  const birds = [];
+  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1c2733, side: THREE.DoubleSide });
+  for (let i = 0; i < 14; i++) {
+    const g = new THREE.Group();
+    const wingGeo = new THREE.BufferGeometry();
+    wingGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      0, 0, 0, 1.1, 0, 0.35, 1.1, 0, -0.35,
+    ]), 3));
+    wingGeo.computeVertexNormals();
+    const wl = new THREE.Mesh(wingGeo, birdMat);
+    const wr = new THREE.Mesh(wingGeo, birdMat);
+    wr.scale.x = -1;
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.7, 6), birdMat);
+    body.rotation.x = Math.PI / 2;
+    g.add(wl); g.add(wr); g.add(body);
+    g.userData = { wl, wr, flap: Math.random() * 6.28 };
+    scene.add(g);
+    birds.push({
+      g, cx: (Math.random() - 0.5) * 320, cz: (Math.random() - 0.5) * 320,
+      cy: 55 + Math.random() * 45, r: 40 + Math.random() * 90,
+      a: Math.random() * Math.PI * 2, speed: (0.05 + Math.random() * 0.05) * (Math.random() < 0.5 ? 1 : -1),
+      flapSpeed: 7 + Math.random() * 4,
+    });
+  }
 
   const PMAX = 420;
   const pGeo = new THREE.BufferGeometry();
@@ -246,6 +331,21 @@ export function createWorld(container) {
     }
   };
 
+  W.updateBirds = function (dt, elapsed, day) {
+    for (const b of birds) {
+      b.a += b.speed * dt;
+      const x = b.cx + Math.cos(b.a) * b.r;
+      const z = b.cz + Math.sin(b.a) * b.r;
+      const y = b.cy + Math.sin(elapsed * 0.7 + b.a * 3) * 3;
+      b.g.position.set(x, y, z);
+      b.g.rotation.y = -b.a - (b.speed > 0 ? 0 : Math.PI);
+      const flap = Math.sin(elapsed * b.flapSpeed + b.g.userData.flap) * 0.7;
+      b.g.userData.wl.rotation.z = flap;
+      b.g.userData.wr.rotation.z = -flap;
+      b.g.visible = day;
+    }
+  };
+
   W.updateSky = function (G, dt, elapsed) {
     const t = G.timeOfDay;
     const sky = skyAt(t);
@@ -262,16 +362,30 @@ export function createWorld(container) {
     W.sun.position.set(px + dir.x * 160, Math.max(12, dir.y * 160), pz + dir.z * 160);
     W.sun.target.position.set(px, 0, pz);
     const golden = (t >= 17 && t <= 19.3) ? 1 - Math.abs(t - 18.2) / 1.3 : 0;
-    W.sunGlow.position.set(px + dir.x * 700, Math.max(30, dir.y * 700), pz + dir.z * 700);
+    const sunPos = new THREE.Vector3(px + dir.x * 760, Math.max(40, dir.y * 760), pz + dir.z * 760);
+    W.sunGlow.position.copy(sunPos);
     W.sunGlow.material.opacity = 0.18 + golden * 0.72;
     W.sunGlow.material.color.setHex(golden > 0.4 ? 0xff8f3d : 0xffe9a8);
+    sunDisc.position.copy(sunPos);
+    sunDisc.lookAt(px, sunPos.y, pz);
+    sunDisc.material.color.setHex(golden > 0.4 ? 0xff9a4d : 0xfff2c8);
     const nf = nightFactor(t);
+    moon.position.set(px - dir.x * 760, Math.max(60, -dir.y * 760 + 260), pz - dir.z * 760);
+    moon.lookAt(px, moon.position.y, pz);
+    moon.material.opacity = nf * 0.9;
     W.starsMat.opacity = nf * 0.9;
     for (const c of W.clouds) {
       c.s.position.x += c.speed * dt;
       if (c.s.position.x > 420) c.s.position.x = -420;
-      c.s.material.opacity = 0.5 - nf * 0.34;
+      c.s.material.opacity = 0.85 - nf * 0.6;
     }
+    for (const p of puffs) {
+      p.grp.position.x += p.speed * dt;
+      if (p.grp.position.x > 420) p.grp.position.x = -420;
+      p.grp.children.forEach((m) => { m.material = puffMat; });
+      puffMat.opacity = 0.9 - nf * 0.65;
+    }
+    W.updateBirds(dt, elapsed, nf < 0.5);
     W.sky.position.set(px, 0, pz);
     W.stars.position.set(px, 0, pz);
   };

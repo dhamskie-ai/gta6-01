@@ -1,120 +1,173 @@
+// SOLARA BAY — the on-foot character: detailed low-poly person meshes,
+// walking/jumping, and the third-person chase camera.
+// Round 6f: people are real articulated figures — hair or hat, jacketed
+// torso with a belt, arms with sleeves, trousers, shoes — with skin-tone
+// and outfit variation, so pedestrians read as people, not blurry boxes.
 import * as THREE from 'three';
 import { CFG } from './config.js';
 import { collideCircle } from './city.js';
 import { isDown, wasPressed, consumeMouse, consumeWheel } from './input.js';
 
+const SKINS = [0xe8b88a, 0xc98a5e, 0x8a5a34, 0xf2c9a0, 0x6e4426];
+const SHIRTS = [0xff2e7e, 0x2e8fd2, 0xe8b93a, 0x3a9e4f, 0x8a5fd2, 0xff8f3d, 0xe8e8e8, 0x37e0ff, 0xd23c2e];
+const PANTS = [0x22303f, 0x3a3f45, 0x5a4a3a, 0x2a4a6b, 0x6b2a3a];
+const HAIRS = [0x14100c, 0x3a2418, 0x6b6b6b, 0x8a5a2a, 0xd2b48c];
+
+function lam(color) {
+  return new THREE.MeshLambertMaterial({ color });
+}
+
+function limb(w, h, d, mat, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  return m;
+}
+
+// colours: { skin, shirt, pants, hair, hat } — all optional.
 export function createPersonMesh(colors) {
-  const grp = new THREE.Group();
-  const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.68, 0.3), mat(colors.shirt));
-  torso.position.y = 1.06; torso.castShadow = true; grp.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), mat(colors.skin));
-  head.position.y = 1.62; head.castShadow = true; grp.add(head);
-  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.34), mat(colors.hair || 0x1c1410));
-  hair.position.y = 1.8; grp.add(hair);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.22), mat(colors.pants));
-  legL.geometry.translate(0, -0.36, 0);
-  legL.position.set(-0.13, 0.72, 0); grp.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.13; grp.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.18), mat(colors.shirt));
-  armL.geometry.translate(0, -0.31, 0);
-  armL.position.set(-0.35, 1.36, 0); grp.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.35; grp.add(armR);
-  grp.userData = { legL, legR, armL, armR, torso, head };
-  return grp;
+  const c = colors || {};
+  const skin = c.skin !== undefined ? c.skin : SKINS[Math.floor(Math.random() * SKINS.length)];
+  const shirt = c.shirt !== undefined ? c.shirt : SHIRTS[Math.floor(Math.random() * SHIRTS.length)];
+  const pants = c.pants !== undefined ? c.pants : PANTS[Math.floor(Math.random() * PANTS.length)];
+  const hair = c.hair !== undefined ? c.hair : HAIRS[Math.floor(Math.random() * HAIRS.length)];
+  const group = new THREE.Group();
+  const skinMat = lam(skin), shirtMat = lam(shirt), pantsMat = lam(pants), hairMat = lam(hair);
+  // Legs (trousers) + shoes.
+  const legL = limb(0.2, 0.78, 0.24, pantsMat, -0.13, 0.39, 0);
+  const legR = limb(0.2, 0.78, 0.24, pantsMat, 0.13, 0.39, 0);
+  const shoeL = limb(0.22, 0.1, 0.36, lam(0x1a1a1a), -0.13, 0.05, 0.05);
+  const shoeR = limb(0.22, 0.1, 0.36, lam(0x1a1a1a), 0.13, 0.05, 0.05);
+  legL.add(shoeL); shoeL.position.set(0, -0.36, 0.05);
+  legR.add(shoeR); shoeR.position.set(0, -0.36, 0.05);
+  // Torso: jacket + belt stripe + collar.
+  const body = limb(0.56, 0.68, 0.32, shirtMat, 0, 1.12, 0);
+  const belt = limb(0.58, 0.09, 0.34, lam(0x14181f), 0, 0.8, 0);
+  const collar = limb(0.4, 0.08, 0.34, lam(0xffffff), 0, 1.44, 0);
+  body.add(belt); belt.position.set(0, -0.3, 0);
+  body.add(collar); collar.position.set(0, 0.34, 0);
+  // Arms with sleeves + hands.
+  const armL = limb(0.16, 0.62, 0.2, shirtMat, -0.37, 1.16, 0);
+  const armR = limb(0.16, 0.62, 0.2, shirtMat, 0.37, 1.16, 0);
+  const handL = limb(0.15, 0.14, 0.18, skinMat, -0.37, 0.82, 0);
+  const handR = limb(0.15, 0.14, 0.18, skinMat, 0.37, 0.82, 0);
+  // Head + hair cap (+ optional hat brim).
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.32), skinMat);
+  head.position.set(0, 1.66, 0);
+  head.castShadow = true;
+  const hairM = limb(0.36, 0.14, 0.34, hairMat, 0, 1.88, 0);
+  const hairBack = limb(0.36, 0.2, 0.08, hairMat, 0, 1.78, -0.15);
+  group.add(legL); group.add(legR); group.add(body);
+  group.add(armL); group.add(armR); group.add(handL); group.add(handR);
+  group.add(head); group.add(hairM); group.add(hairBack);
+  if (c.hat) {
+    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.1, 10), lam(c.hat));
+    hat.position.set(0, 1.96, 0);
+    group.add(hat);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.03, 10), lam(c.hat));
+    brim.position.set(0, 1.91, 0);
+    group.add(brim);
+  }
+  group.userData.parts = { legL, legR, armL, armR, handL, handR, head, body };
+  return group;
 }
 
 export function createPlayerMesh() {
-  const grp = createPersonMesh({ shirt: 0x1f7a6e, pants: 0x2e3440, skin: 0xc98d64, hair: 0x14100c });
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.1, 0.36),
-    new THREE.MeshLambertMaterial({ color: 0xff2e7e }));
-  cap.position.y = 1.86; grp.add(cap);
-  return grp;
+  // Nico: red jacket, dark jeans, dark hair — the player is unmistakable.
+  return createPersonMesh({ skin: 0xe8b88a, shirt: 0xd21f4e, pants: 0x22303f, hair: 0x14100c });
 }
 
 export function placePlayer(G, x, z, heading) {
-  G.player.x = x; G.player.z = z; G.player.y = 0; G.player.vy = 0;
+  G.player.x = x; G.player.z = z;
   G.player.heading = heading !== undefined ? heading : 0;
-  G.player.camYaw = heading !== undefined ? heading : 0;
+  G.player.vy = 0; G.player.y = 0;
   G.player.mesh.position.set(x, 0, z);
-  G.player.mesh.rotation.y = G.player.heading;
+  G.player.mesh.rotation.y = heading !== undefined ? heading : 0;
 }
 
 export function updateOnFoot(G, input, dt) {
   const p = G.player;
-  const { dx, dy } = consumeMouse(input);
-  p.camYaw -= dx * 0.0028;
-  p.camPitch = Math.max(-0.45, Math.min(0.55, p.camPitch + dy * 0.0022));
-  const wheel = consumeWheel(input);
-  if (wheel !== 0) p.camDist = Math.max(4, Math.min(12, p.camDist + Math.sign(wheel) * 1.2));
-  if (wasPressed(input, 'KeyC')) p.camDist = p.camDist > 7 ? 5.5 : 10;
-
+  const run = isDown(input, 'ShiftLeft') || isDown(input, 'ShiftRight');
+  const speed = run ? CFG.runSpeed : CFG.walkSpeed;
   const fwd = (isDown(input, 'KeyW') || isDown(input, 'ArrowUp') ? 1 : 0)
     - (isDown(input, 'KeyS') || isDown(input, 'ArrowDown') ? 1 : 0);
   const strafe = (isDown(input, 'KeyD') || isDown(input, 'ArrowRight') ? 1 : 0)
     - (isDown(input, 'KeyA') || isDown(input, 'ArrowLeft') ? 1 : 0);
-  const running = isDown(input, 'ShiftLeft') || isDown(input, 'ShiftRight');
-  const speed = running ? CFG.runSpeed : CFG.walkSpeed;
-  const len = Math.hypot(fwd, strafe) || 1;
-  const mx = (Math.sin(p.camYaw) * fwd + Math.cos(p.camYaw) * strafe) / len;
-  const mz = (Math.cos(p.camYaw) * fwd - Math.sin(p.camYaw) * strafe) / len;
-  const moving = fwd !== 0 || strafe !== 0;
-  let nx = p.x + mx * speed * dt * (moving ? 1 : 0);
-  let nz = p.z + mz * speed * dt * (moving ? 1 : 0);
-  const fixed = collideCircle(G.city, nx, nz, 0.55);
-  nx = fixed.x; nz = fixed.z;
-  p.x = nx; p.z = nz;
-  if (moving) p.heading = Math.atan2(mx, mz);
-  if (wasPressed(input, 'Space') && p.onGround) { p.vy = CFG.jumpSpeed; p.onGround = false; }
+  const mouse = consumeMouse(input);
+  p.camYaw -= mouse.dx * 0.0032;
+  p.camPitch = Math.max(-0.4, Math.min(0.55, p.camPitch + mouse.dy * 0.0024));
+  const wheel = consumeWheel(input);
+  if (wheel !== 0) p.camDist = Math.max(4, Math.min(14, p.camDist + Math.sign(wheel)));
+  if (wasPressed(input, 'KeyC')) p.camDist = p.camDist > 8 ? 5.5 : 10;
+  const sin = Math.sin(p.camYaw), cos = Math.cos(p.camYaw);
+  let mx = (-sin * fwd + cos * strafe);
+  let mz = (-cos * fwd - sin * strafe);
+  const ml = Math.hypot(mx, mz);
+  if (ml > 0.01) { mx /= ml; mz /= ml; }
+  const nx = p.x + mx * speed * dt;
+  const nz = p.z + mz * speed * dt;
+  if (!collideCircle(G.city, nx, nz, 0.55)) { p.x = nx; p.z = nz; }
+  else if (!collideCircle(G.city, nx, p.z, 0.55)) { p.x = nx; }
+  else if (!collideCircle(G.city, p.x, nz, 0.55)) { p.z = nz; }
+  if (ml > 0.01) p.heading = Math.atan2(mx, mz);
+  // Jump + gravity.
+  if (wasPressed(input, 'Space') && p.y <= 0.01) p.vy = CFG.jumpSpeed;
   p.vy -= CFG.gravity * dt;
   p.y += p.vy * dt;
-  if (p.y <= 0) { p.y = 0; p.vy = 0; p.onGround = true; }
-  p.walkPhase += dt * (moving ? speed * 1.6 : 0);
-  const swing = moving ? Math.sin(p.walkPhase) * 0.6 : 0;
-  const u = p.mesh.userData;
-  u.legL.rotation.x = swing;
-  u.legR.rotation.x = -swing;
-  u.armL.rotation.x = -swing * 0.75;
-  u.armR.rotation.x = swing * 0.75;
+  if (p.y < 0) { p.y = 0; p.vy = 0; }
+  // Procedural walk swing.
+  p.walkPhase += dt * (ml > 0.01 ? speed * 1.6 : 0);
+  const parts = p.mesh.userData.parts;
+  const swing = ml > 0.01 ? Math.sin(p.walkPhase) * (run ? 0.75 : 0.55) : 0;
+  parts.legL.rotation.x = swing;
+  parts.legR.rotation.x = -swing;
+  parts.armL.rotation.x = -swing * 0.8;
+  parts.armR.rotation.x = swing * 0.8;
+  parts.body.position.y = 1.12 + Math.abs(Math.sin(p.walkPhase)) * 0.05;
   p.mesh.position.set(p.x, p.y, p.z);
   p.mesh.rotation.y = p.heading;
-  G.audio.engine(false, 0);
+  // Sun coin pickup.
+  for (const c of G.city.coins) {
+    if (!c.taken && Math.hypot(p.x - c.x, p.z - c.z) < 1.6) {
+      c.taken = true;
+      c.mesh.visible = false;
+      G.cash += 50;
+      G.coinsGot = (G.coinsGot || 0) + 1;
+      G.audio.coin();
+    }
+  }
 }
 
 export function syncPlayerToCar(G) {
+  const p = G.player;
   if (!G.car) return;
-  G.player.x = G.car.x;
-  G.player.z = G.car.z;
-  G.player.heading = G.car.heading;
-  G.player.mesh.position.set(G.car.x, 0, G.car.z);
+  p.x = G.car.x; p.z = G.car.z;
+  p.mesh.position.set(p.x, -2, p.z);
+  p.mesh.visible = false;
+  p.heading = G.car.heading;
 }
 
 export function updateCamera(G, dt) {
   const W = G.W;
-  const cam = W.camera;
   const p = G.player;
-  const snap = G.shotMode ? 1 : 0;
   if (G.inCar && G.car) {
-    const car = G.car;
-    const back = 8.5 + Math.abs(car.speed) * 0.06;
-    const cy = 3.4 + Math.abs(car.speed) * 0.015;
-    const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    const tx = car.x - fx * back, tz = car.z - fz * back;
-    const k = snap || Math.min(1, dt * 5);
-    cam.position.x += (tx - cam.position.x) * k;
-    cam.position.y += (cy - cam.position.y) * k;
-    cam.position.z += (tz - cam.position.z) * k;
-    cam.lookAt(car.x + fx * 6, 1.4, car.z + fz * 6);
-    p.camYaw = car.heading;
-    return;
+    const c = G.car;
+    const back = 9.5 + Math.abs(c.speed) * 0.06;
+    const tx = c.x - Math.sin(c.heading) * back;
+    const tz = c.z - Math.cos(c.heading) * back;
+    const ty = 4.2 + Math.abs(c.speed) * 0.02;
+    W.camera.position.x += (tx - W.camera.position.x) * Math.min(1, dt * 5);
+    W.camera.position.y += (ty - W.camera.position.y) * Math.min(1, dt * 5);
+    W.camera.position.z += (tz - W.camera.position.z) * Math.min(1, dt * 5);
+    W.camera.lookAt(c.x + Math.sin(c.heading) * 6, 1.6, c.z + Math.cos(c.heading) * 6);
+  } else {
+    const d = p.camDist;
+    const cx = p.x + Math.sin(p.camYaw) * d * Math.cos(p.camPitch);
+    const cz = p.z + Math.cos(p.camYaw) * d * Math.cos(p.camPitch);
+    const cy = 2.2 + Math.sin(p.camPitch) * d + 1.4;
+    W.camera.position.x += (cx - W.camera.position.x) * Math.min(1, dt * 10);
+    W.camera.position.y += (cy - W.camera.position.y) * Math.min(1, dt * 10);
+    W.camera.position.z += (cz - W.camera.position.z) * Math.min(1, dt * 10);
+    W.camera.lookAt(p.x, 1.7 + p.y, p.z);
   }
-  const d = p.camDist;
-  const cx = p.x - Math.sin(p.camYaw) * Math.cos(p.camPitch) * d;
-  const cz = p.z - Math.cos(p.camYaw) * Math.cos(p.camPitch) * d;
-  const cy = p.y + 1.7 + Math.sin(p.camPitch) * d + 0.6;
-  const k2 = snap || Math.min(1, dt * 10);
-  cam.position.x += (cx - cam.position.x) * k2;
-  cam.position.y += (cy - cam.position.y) * k2;
-  cam.position.z += (cz - cam.position.z) * k2;
-  cam.lookAt(p.x, p.y + 1.5, p.z);
 }

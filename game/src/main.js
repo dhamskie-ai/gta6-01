@@ -1,3 +1,6 @@
+// SOLARA BAY — boot, game loop, stealing/exiting cars, and the
+// window.__game debug handle used by the automated playtest.
+// Phases: title -> play -> pause / dead / busted / failed / won.
 import { CFG } from './config.js';
 import { mulberry32 } from './random.js';
 import { createInput, isDown, wasPressed, endFrame, requestLock } from './input.js';
@@ -5,7 +8,7 @@ import { createAudio } from './audio.js';
 import { buildCity, updateCityFx } from './city.js';
 import { updatePlayerCar } from './vehicles.js';
 import { initTraffic, updateTraffic, nearestParkedCar, nearestTrafficCar } from './traffic.js';
-import { createPlayerMesh, createPersonMesh, placePlayer, updateOnFoot, updateCamera, syncPlayerToCar } from './player.js';
+import { createPlayerMesh, placePlayer, updateOnFoot, updateCamera, syncPlayerToCar } from './player.js';
 import { addWanted, updatePolice } from './police.js';
 import { initCombat, updateCombat, updateEnemies } from './combat.js';
 import { initMissions, startMission, updateMissions, currentMission } from './missions.js';
@@ -14,149 +17,109 @@ import { createWorld } from './render.js';
 import { applyShot, tickShot } from './shots.js';
 
 function stealCar(G, car, fromTraffic) {
-  G.parked = G.parked.filter((c) => c !== car);
-  G.traffic = G.traffic.filter((t) => t.car !== car);
   if (fromTraffic) {
-    const driver = createPersonMesh({ shirt: 0xd95f5f, pants: 0x2e3440, skin: 0xc98d64, hair: 0x14100c });
-    driver.position.set(car.x + 2, 0, car.z + 2);
-    G.W.scene.add(driver);
-    G.peds.push({ mesh: driver, x: car.x + 2, z: car.z + 2, axis: 'x', side: 1, dir: 1, speed: 1.5, flee: 4, walkPhase: 0, name: 'Driver', hp: 30 });
+    G.traffic = G.traffic.filter((t) => t.car !== car);
+    addWanted(G, 1, 'mencuri mobil');
+    G.stats.stolen = (G.stats.stolen || 0) + 1;
   }
-  car.isPlayer = true;
-  car.stolen = true;
+  car.traffic = false;
+  car.owned = true;
   G.car = car;
   G.inCar = true;
-  G.player.mesh.visible = false;
   syncPlayerToCar(G);
-  G.stats.carsStolen++;
-  const nearPolice = G.policeCars.some((pc) => Math.hypot(pc.car.x - G.player.x, pc.car.z - G.player.z) < 40)
-    || G.footPolice.length > 0;
-  if (nearPolice) addWanted(G, 1, 'Wanted +1 — mencuri mobil di depan PCPD');
-  else toast(G, `${car.name} dicuri — gas!`);
+  G.audio.horn();
+  toast(G, `Mobil dicuri — ${car.def.name}`);
 }
 
 function exitCar(G) {
-  const car = G.car;
-  if (!car) return;
-  car.speed = 0;
-  if (!G.parked.includes(car)) G.parked.push(car);
-  G.car = null;
+  if (!G.car) return;
+  const c = G.car;
+  const side = { x: c.x + Math.cos(c.heading) * 2.2, z: c.z - Math.sin(c.heading) * 2.2 };
   G.inCar = false;
-  placePlayer(G, car.x + 2.5, car.z + 2.5, car.heading);
   G.player.mesh.visible = true;
-  G.audio.engine(false, 0);
-}
-
-function resetRun(G, fresh) {
-  for (const pc of G.policeCars) G.W.scene.remove(pc.car.group);
-  for (const fp of G.footPolice) G.W.scene.remove(fp.mesh);
-  for (const e of G.enemies) G.W.scene.remove(e.mesh);
-  G.policeCars = []; G.footPolice = []; G.enemies = [];
-  if (G.car) { G.W.scene.remove(G.car.group); G.car = null; }
-  G.inCar = false;
-  G.wanted = 0;
-  G.health = 100;
-  G.armor = 50;
-  G._kills = 0;
-  G.audio.siren(false);
-  G.audio.engine(false, 0);
-  if (fresh) {
-    G.cash = 10350;
-    G.day = 1;
-    G.timeOfDay = CFG.dayStart;
-    G.missionIndex = 0;
-    G.stats = { time: 0, carsStolen: 0, maxWanted: 0, missionsDone: 0 };
-    G.coinsCollected = 0;
-    initCombat(G);
-    placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
-    G.player.mesh.visible = true;
-  }
+  placePlayer(G, side.x, side.z, c.heading);
+  G.audio.engine(0);
 }
 
 function boot() {
-  const params = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(location.search);
   const seed = parseInt(params.get('seed') || '1', 10) || 1;
   const shot = params.get('shot');
   const container = document.getElementById('game-container');
   const W = createWorld(container);
-
+  const rng = mulberry32(seed);
   const G = {
-    seed, rng: mulberry32(seed), W,
-    phase: 'title', shotMode: false, shotName: null,
+    W, rng, seed,
+    phase: 'title',
+    player: { x: CFG.playerStart.x, z: CFG.playerStart.z, y: 0, vy: 0, heading: 0, walkPhase: 0, camYaw: Math.PI, camPitch: 0.22, camDist: 6.5, mesh: null },
+    car: null, inCar: false,
+    traffic: [], parked: [], peds: [],
+    policeCars: [], policeFoot: [],
+    enemies: [],
+    wanted: 0, cash: 10350, health: 100, armor: 50,
+    weapon: 2, ammo: {}, owned: {},
     timeOfDay: CFG.dayStart, day: 1,
-    cash: 10350, wanted: 0, wantedSeen: 0, wantedTimer: 0,
-    health: 100, armor: 50, weapon: 2, spare: 0,
-    missionIndex: 0, missionStage: 0, missionTimer: 0, missionTarget: null,
-    stats: { time: 0, carsStolen: 0, maxWanted: 0, missionsDone: 0 },
-    respect: 1, radioTrack: 0,
-    player: null, car: null, inCar: false,
-    traffic: [], peds: [], parked: [], policeCars: [], footPolice: [], enemies: [],
-    _panic: 0, _policeSeq: 0, _heli: null, _heliVisible: false,
-    _promptText: null, _resprayKey: false, _talkKey: false, _taxiKey: false,
-    _shotWantedLock: false, _shotPlaced: false, _shotFrames: 0,
-    city: null, input: null, audio: null, hud: null, marco: null, lupe: null, boat: null,
-    coins: [], coinsCollected: 0, ramps: [], taxi: null, _courier: null, _rivals: null,
-    _tailTimer: 0, _tailSeen: 0, _kills: 0, _nearRespray: false, _nearTaxi: false,
+    city: null, input: null, audio: null,
+    stats: { time: 0, stolen: 0 },
+    coinsGot: 0, kills: 0,
+    lastSeen: 0, _panic: 0, _decayBucket: 0,
+    _promptText: null, _nearRespray: false, _nearTaxi: false,
+    _resprayKey: false, _talkKey: false, _taxiKey: false,
+    shotMode: false, _shotFrames: 0, gameWon: false,
   };
   G.audio = createAudio();
-  G.city = buildCity(W.scene, G.rng, W.renderer.capabilities.getMaxAnisotropy(), W.software);
-  const playerMesh = createPlayerMesh();
-  W.scene.add(playerMesh);
-  G.player = {
-    mesh: playerMesh, x: CFG.playerStart.x, z: CFG.playerStart.z, y: 0, vy: 0,
-    heading: 0, camYaw: 0, camPitch: 0.12, camDist: 7, onGround: true, walkPhase: 0,
-  };
-  placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
   G.input = createInput(W.renderer.domElement);
-  initTraffic(G, G.rng);
+  G.city = buildCity(W.scene, rng, W.renderer.capabilities.getMaxAnisotropy(), W.software);
+  G.player.mesh = createPlayerMesh();
+  W.scene.add(G.player.mesh);
+  placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
+  G.showDialog = (s, r, t) => showDialog(G, s, r, t);
+  G.showObjective = (t) => showObjective(G, t);
+  G.toast = (t) => toast(G, t);
+  initTraffic(G, rng);
   initCombat(G);
   initMissions(G);
-
-  const hudState = initHUD(G, {
-    onNew: () => { resetRun(G, true); startMission(G, 0); G.phase = 'play'; setPhase(G, 'play'); G.audio.ensure(); G.audio.music(true); },
+  initHUD(G, {
+    onNew: () => {
+      clearSave();
+      G.cash = 10350; G.health = 100; G.armor = 50; G.wanted = 0; G.day = 1; G.timeOfDay = CFG.dayStart;
+      G.gameWon = false;
+      startMission(G, 0);
+      setPhase(G, 'play');
+      requestLock(G.input);
+      G.audio.unlock(); G.audio.startMusic();
+    },
     onContinue: () => {
       const save = loadGame();
-      resetRun(G, true);
       if (save) {
-        G.cash = save.cash; G.day = save.day || 1; G.timeOfDay = save.timeOfDay || CFG.dayStart;
-        G.coinsCollected = save.coinsCollected || 0;
-        if (save.ammo) G.ammo = save.ammo;
-        if (save.owned) G.owned = save.owned;
-        if (save.stats) G.stats = save.stats;
-        startMission(G, save.missionIndex || 0);
+        G.cash = save.cash; G.day = save.day || 1; G.coinsGot = save.coinsGot || 0;
+        startMission(G, Math.min(save.missionIndex || 0, 7));
       } else startMission(G, 0);
-      G.phase = 'play'; setPhase(G, 'play'); G.audio.ensure(); G.audio.music(true);
+      setPhase(G, 'play');
+      requestLock(G.input);
+      G.audio.unlock(); G.audio.startMusic();
     },
-    onResume: () => { G.phase = 'play'; setPhase(G, 'play'); },
-    onRestartMission: () => { resetRun(G, false); placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0); startMission(G, G.missionIndex); G.phase = 'play'; setPhase(G, 'play'); },
-    onSaveQuit: () => { saveGame(G); G.phase = 'title'; setPhase(G, 'title'); G.audio.music(false); },
-    onRetry: () => {
-      resetRun(G, false);
+    onResume: () => { setPhase(G, 'play'); requestLock(G.input); },
+    onRestartMission: () => {
       G.health = 100;
-      placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
-      G.player.mesh.visible = true;
       startMission(G, G.missionIndex);
-      G.phase = 'play'; setPhase(G, 'play');
+      setPhase(G, 'play');
     },
-    onRoam: () => { G.phase = 'play'; setPhase(G, 'play'); },
-    onTitle: () => { G.phase = 'title'; setPhase(G, 'title'); },
+    onSaveQuit: () => { saveGame(G); setPhase(G, 'title'); },
+    onRetry: () => {
+      G.health = 100; G.armor = 50; G.wanted = 0;
+      if (G.inCar) exitCar(G);
+      placePlayer(G, CFG.playerStart.x, CFG.playerStart.z, 0);
+      startMission(G, G.missionIndex);
+      setPhase(G, 'play');
+    },
+    onRoam: () => { G.health = 100; G.wanted = 0; setPhase(G, 'play'); },
+    onTitle: () => setPhase(G, 'title'),
   });
-  G.hud = Object.assign(hudState, {
-    showDialog: (s, r, t) => showDialog(G, s, r, t),
-    showObjective: (t) => showObjective(G, t),
-    toast: (t) => toast(G, t),
-    setPhase: (p) => setPhase(G, p),
-    saveGame: () => saveGame(G),
-  });
-
-  W.renderer.domElement.addEventListener('click', () => {
-    G.audio.ensure();
-    if (G.phase === 'play') requestLock(G.input);
-  });
-  window.addEventListener('keydown', () => G.audio.ensure(), { once: true });
 
   if (shot) {
     applyShot(G, shot);
+    setPhase(G, 'play');
   } else {
     setPhase(G, 'title');
     showDialog(G, 'Marco', 'SMUGGLER · WHEELMAN', 'Selamat datang di Solara Bay, Nico. Kota ini milik siapa yang berani ambil.');
@@ -189,7 +152,7 @@ function boot() {
       const hit = nearestParkedCar(G, G.player.x, G.player.z, 6)
         || nearestTrafficCar(G, G.player.x, G.player.z, 6);
       if (!hit) return false;
-      stealCar(G, hit.car || hit.t.car, !!hit.t);
+      stealCar(G, hit.car, hit.kind === 'traffic');
       return true;
     },
   };
@@ -237,14 +200,13 @@ function boot() {
                 G.cash -= 200;
                 G.ammo.mako = Math.min(150, (G.ammo.mako || 0) + 60);
                 G.ammo.vesper = Math.min(72, (G.ammo.vesper || 0) + 24);
-                G.spare = (G.spare || 0) + 30;
                 toast(G, 'Ammo dibeli — MAKO +60, VESPER +24 ($200)');
               } else toast(G, 'Uang tidak cukup — butuh $200');
             } else {
               const parked = nearestParkedCar(G, G.player.x, G.player.z, 4.5);
               const traffic = parked ? null : nearestTrafficCar(G, G.player.x, G.player.z, 4.5);
               if (parked) stealCar(G, parked.car, false);
-              else if (traffic) stealCar(G, traffic.t.car, true);
+              else if (traffic) stealCar(G, traffic.car, true);
             }
           }
         }
@@ -262,6 +224,7 @@ function boot() {
       W.updateFx(dt);
       updateCamera(G, dt);
       updateHUD(G, dt);
+      if (G._savedMission !== G.missionIndex) { G._savedMission = G.missionIndex; saveGame(G); }
       if (G.shotMode) { /* staged prompt stays */ }
       else if (G.inCar) G._promptText = 'E — Keluar mobil';
       else {

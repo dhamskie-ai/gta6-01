@@ -1,164 +1,155 @@
+// SOLARA BAY — traffic cars + ambient pedestrians.
+// Round 6f: pedestrians are detailed people (see player.js) who walk the
+// sidewalks on real waypoints, vary in speed, clothes and hats, stop and
+// look around, and run away when a car or a gunshot comes close. Traffic
+// cars follow the road graph, stop at red lights and honk when blocked.
 import { CFG, CAR_DEFS } from './config.js';
 import { rr, ri, pick, chance } from './random.js';
-import { makeCar } from './vehicles.js';
+import { makeCar, driveToward, carForward } from './vehicles.js';
 import { createPersonMesh } from './player.js';
-import { lightStateAt, randomRoadPoint } from './city.js';
+import { collideCircle, lightStateAt, randomRoadPoint } from './city.js';
 
-const TRAFFIC_TYPES = ['cometa', 'pip', 'cabro', 'mula', 'cometa', 'pip'];
+const TRAFFIC_TYPES = ['cometa', 'pip', 'cabro', 'mula', 'cometa', 'pip', 'veloce'];
+
+function onSidewalkPoint(rng) {
+  const r = pick(rng, CFG.roads);
+  const v = rr(rng, -280, 280);
+  const side = chance(rng, 0.5) ? 6.75 : -6.75;
+  return chance(rng, 0.5) ? { x: r + side, z: v } : { x: v, z: r + side };
+}
 
 export function initTraffic(G, rng) {
   G.traffic = [];
-  G.peds = [];
   G.parked = [];
-  const used = new Set();
+  G.peds = [];
+  // Moving traffic on the road graph.
   for (let i = 0; i < CFG.trafficCount; i++) {
-    const axis = chance(rng, 0.5) ? 'x' : 'z';
-    const line = pick(rng, CFG.roads);
-    const dir = chance(rng, 0.5) ? 1 : -1;
-    const lane = dir > 0 ? 2.2 : -2.2;
-    const along = rr(rng, -280, 280);
-    const x = axis === 'x' ? along : line + lane;
-    const z = axis === 'x' ? line + lane : along;
-    const heading = axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
+    const p = randomRoadPoint(rng);
     const type = pick(rng, TRAFFIC_TYPES);
-    const car = makeCar(type, x, z, heading);
-    car.speed = rr(rng, 8, 14);
+    const car = makeCar(type, p.x, p.z, rr(rng, 0, Math.PI * 2), undefined, false);
+    car.traffic = true;
     G.W.scene.add(car.group);
-    G.traffic.push({ car, axis, line, dir, speed: car.speed, targetSpeed: rr(rng, 9, 15), hornCd: 0 });
+    G.traffic.push({ car, kind: 'traffic', route: randomRoadPoint(rng), wait: 0 });
   }
-  const fixedSpots = [
-    { type: 'bus', x: -236, z: 40, heading: 0 },
-    { type: 'taco', x: -236, z: 130, heading: 0 },
-    { type: 'veloce', x: -232, z: 70, heading: 0 },
-  ];
-  for (const s of fixedSpots) {
-    const car = makeCar(s.type, s.x, s.z, s.heading);
-    car.speed = 0;
-    G.W.scene.add(car.group);
-    G.parked.push(car);
-  }
-  let tries = 0;
-  while (G.parked.length < CFG.parkedCount + 3 && tries < 200) {
-    tries++;
+  // Parked cars along the Malecón and downtown, incl. the hero VELOZ.
+  const hero = makeCar('veloce', -234, 66, Math.PI / 2, 0xff2e7e, true);
+  hero.owned = false;
+  G.W.scene.add(hero.group);
+  G.parked.push({ car: hero, kind: 'parked' });
+  for (let i = 0; i < CFG.parkedCount; i++) {
     const p = randomRoadPoint(rng);
-    const axis = chance(rng, 0.5) ? 'x' : 'z';
-    const off = chance(rng, 0.5) ? 4.4 : -4.4;
-    const x = axis === 'x' ? p.x : p.x + off;
-    const z = axis === 'x' ? p.z + off : p.z;
-    const key = `${Math.round(x / 10)}:${Math.round(z / 10)}`;
-    if (used.has(key)) continue;
-    if (Math.abs(x + 240) < 3 && Math.abs(z - 90) < 8) continue; // keep Marlin Ceviche clear
-    used.add(key);
-    const type = pick(rng, ['cometa', 'pip', 'cabro', 'mula', 'veloce']);
-    const car = makeCar(type, x, z, axis === 'x' ? Math.PI / 2 : 0);
-    car.speed = 0;
+    const type = pick(rng, ['cometa', 'pip', 'cabro', 'mula', 'veloce', 'hauler']);
+    const car = makeCar(type, p.x + rr(rng, -2, 2), p.z + rr(rng, -2, 2), rr(rng, 0, Math.PI * 2), undefined, false);
     G.W.scene.add(car.group);
-    G.parked.push(car);
+    G.parked.push({ car, kind: 'parked' });
   }
-  const shirtCols = [0xd95f5f, 0x5f8fd9, 0x63c06a, 0xe8b93a, 0x9a6fd0, 0xe87ab0, 0x4fb3a9, 0xd9d9d9];
-  const skinCols = [0xc98d64, 0x8a5a3a, 0xe8b88a, 0x6b4426];
+  // Bus + taco truck parked near the beach party strip.
+  const bus = makeCar('bus', -232, 120, Math.PI, undefined, false);
+  G.W.scene.add(bus.group);
+  G.parked.push({ car: bus, kind: 'parked' });
+  const taco = makeCar('taco', -232, 140, Math.PI, undefined, false);
+  G.W.scene.add(taco.group);
+  G.parked.push({ car: taco, kind: 'parked' });
+  // Pedestrians on sidewalks.
   for (let i = 0; i < CFG.pedCount; i++) {
-    const p = randomRoadPoint(rng);
-    const axis = chance(rng, 0.5) ? 'x' : 'z';
-    const side = chance(rng, 0.5) ? 1 : -1;
-    const x = axis === 'x' ? p.x : p.x + side * 6.8;
-    const z = axis === 'x' ? p.z + side * 6.8 : p.z;
-    const mesh = createPersonMesh({
-      shirt: pick(rng, shirtCols), pants: pick(rng, [0x2e3440, 0x5a4632, 0x3a4a5a]), skin: pick(rng, skinCols),
-    });
-    mesh.position.set(x, 0, z);
+    const start = onSidewalkPoint(rng);
+    const mesh = createPersonMesh({ hat: chance(rng, 0.25) ? pick(rng, [0xffd23f, 0x2e8fd2, 0xd23c2e]) : undefined });
+    mesh.position.set(start.x, 0, start.z);
     G.W.scene.add(mesh);
+    const target = onSidewalkPoint(rng);
     G.peds.push({
-      mesh, x, z, axis, side, dir: chance(rng, 0.5) ? 1 : -1,
+      mesh, x: start.x, z: start.z, tx: target.x, tz: target.z,
       speed: rr(rng, 1.0, 1.9), flee: 0, walkPhase: rr(rng, 0, 6),
-      name: 'Ped', hp: 30,
+      name: 'Ped', hp: 30, pause: 0, heading: rr(rng, 0, Math.PI * 2),
     });
   }
 }
 
 export function nearestParkedCar(G, x, z, maxD) {
-  let best = null, bestD = maxD;
-  for (const car of G.parked) {
-    const d = Math.hypot(car.x - x, car.z - z);
-    if (d < bestD) { bestD = d; best = car; }
+  let best = null, bd = maxD;
+  for (const p of G.parked) {
+    const d = Math.hypot(p.car.x - x, p.car.z - z);
+    if (d < bd) { bd = d; best = p; }
   }
-  return best ? { car: best, d: bestD } : null;
+  return best;
 }
 
 export function nearestTrafficCar(G, x, z, maxD) {
-  let best = null, bestD = maxD;
+  let best = null, bd = maxD;
   for (const t of G.traffic) {
     const d = Math.hypot(t.car.x - x, t.car.z - z);
-    if (d < bestD) { bestD = d; best = t; }
+    if (d < bd) { bd = d; best = t; }
   }
-  return best ? { t: best, d: bestD } : null;
+  return best;
 }
 
 export function updateTraffic(G, dt, elapsed) {
-  const px = G.inCar && G.car ? G.car.x : G.player.x;
-  const pz = G.inCar && G.car ? G.car.z : G.player.z;
+  // Traffic cars drive toward their route point, obey lights, avoid the player.
   for (const t of G.traffic) {
     const car = t.car;
-    let want = t.targetSpeed;
-    const aheadX = car.x + Math.sin(car.heading) * 12;
-    const aheadZ = car.z + Math.cos(car.heading) * 12;
-    const onAxis = t.axis;
-    if (lightStateAt(G.city, aheadX, aheadZ, onAxis, elapsed) === 'red') want = 0;
-    for (const o of G.traffic) {
-      if (o === t || o.axis !== t.axis || o.line !== t.line || o.dir !== t.dir) continue;
-      const along = t.axis === 'x' ? (o.car.x - car.x) * t.dir : (o.car.z - car.z) * t.dir;
-      const lateral = t.axis === 'x' ? Math.abs(o.car.z - car.z) : Math.abs(o.car.x - car.x);
-      if (along > 0 && along < 9 && lateral < 3) { want = Math.min(want, o.car.speed * 0.6); break; }
+    if (!t.route) t.route = randomRoadPoint(G.rng);
+    if (t.wait > 0) { t.wait -= dt; car.speed *= 0.9; continue; }
+    const dx = car.x - G.player.x, dz = car.z - G.player.z;
+    const playerNear = dx * dx + dz * dz < 30 * 30;
+    const axis = Math.abs(car.x - Math.round(car.x / 120) * 120) < 6 ? 'z' : 'x';
+    const nearJunction = CFG.roads.some((r) => Math.abs(car.x - r) < 12) && CFG.roads.some((r) => Math.abs(car.z - r) < 12);
+    if (nearJunction && lightStateAt(G.city, car.x, car.z, axis, elapsed) === 'red' && Math.random() < 0.9) {
+      car.speed = Math.max(0, car.speed - 20 * dt);
+      continue;
     }
-    if (G.car) {
-      const along = t.axis === 'x' ? (G.car.x - car.x) * t.dir : (G.car.z - car.z) * t.dir;
-      const lateral = t.axis === 'x' ? Math.abs(G.car.z - car.z) : Math.abs(G.car.x - car.x);
-      if (along > 0 && along < 8 && lateral < 3.2) {
-        want = 0;
-        t.hornCd -= dt;
-        if (t.hornCd <= 0) { G.audio.horn(); t.hornCd = 5; }
+    const d = driveToward(car, t.route.x, t.route.z, dt, G.city, car.def.maxSpeed * 0.55);
+    if (d < 4) t.route = randomRoadPoint(G.rng);
+    if (playerNear && G.inCar && Math.hypot(G.car.x - car.x, G.car.z - car.z) < 6 && Math.random() < dt * 0.4) {
+      G.audio.horn();
+    }
+    // Gentle separation between traffic cars.
+    for (const o of G.traffic) {
+      if (o === t) continue;
+      const ox = car.x - o.car.x, oz = car.z - o.car.z;
+      const dd = ox * ox + oz * oz;
+      if (dd < 16 && dd > 0.01) {
+        car.x += (ox / Math.sqrt(dd)) * dt * 2;
+        car.z += (oz / Math.sqrt(dd)) * dt * 2;
       }
     }
-    car.speed += (want - car.speed) * Math.min(1, dt * 1.6);
-    if (t.axis === 'x') {
-      car.x += t.dir * car.speed * dt;
-      if (car.x > 288) car.x = -288;
-      if (car.x < -288) car.x = 288;
-      car.z = t.line + (t.dir > 0 ? 2.2 : -2.2);
-    } else {
-      car.z += t.dir * car.speed * dt;
-      if (car.z > 288) car.z = -288;
-      if (car.z < -288) car.z = 288;
-      car.x = t.line + (t.dir > 0 ? 2.2 : -2.2);
-    }
-    car.group.position.set(car.x, 0, car.z);
-    const spin = car.speed * dt / 0.36;
-    for (const w of car.group.userData.wheels) { w.wheel.rotation.y += spin; }
   }
+  // Pedestrians: walk sidewalk waypoints, pause, flee from danger.
   for (const p of G.peds) {
-    const dPlayer = Math.hypot(p.x - px, p.z - pz);
-    if (G._panic > 0 && dPlayer < 26) p.flee = 2.5;
-    if (G.inCar && G.car && Math.abs(G.car.speed) > 6 && dPlayer < 6) p.flee = 2;
-    let spd = p.speed;
-    if (p.flee > 0) { p.flee -= dt; spd = 5.2; }
-    if (p.axis === 'x') {
-      p.x += p.dir * spd * dt;
-      if (p.flee > 0) p.z += (p.z > pz ? 1 : -1) * spd * 0.4 * dt;
-      if (p.x > 286 || p.x < -286) p.dir *= -1;
-      if (Math.random() < dt * 0.02) p.dir *= -1;
+    const danger = G._panic > 0
+      || (G.inCar && G.car && Math.hypot(G.car.x - p.x, G.car.z - p.z) < 5 && Math.abs(G.car.speed) > 8);
+    if (danger) p.flee = Math.max(p.flee, 2.5);
+    if (p.flee > 0) {
+      p.flee -= dt;
+      const dx = p.x - G.player.x, dz = p.z - G.player.z;
+      const l = Math.hypot(dx, dz) || 1;
+      p.x += (dx / l) * 4.5 * dt;
+      p.z += (dz / l) * 4.5 * dt;
+      p.heading = Math.atan2(dx / l, dz / l);
+    } else if (p.pause > 0) {
+      p.pause -= dt;
     } else {
-      p.z += p.dir * spd * dt;
-      if (p.flee > 0) p.x += (p.x > px ? 1 : -1) * spd * 0.4 * dt;
-      if (p.z > 286 || p.z < -286) p.dir *= -1;
-      if (Math.random() < dt * 0.02) p.dir *= -1;
+      const dx = p.tx - p.x, dz = p.tz - p.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.5) {
+        const np = onSidewalkPoint(G.rng);
+        p.tx = np.x; p.tz = np.z;
+        if (Math.random() < 0.25) p.pause = rr(G.rng, 1, 4);
+      } else {
+        const spd = p.speed * dt;
+        p.x += (dx / dist) * spd;
+        p.z += (dz / dist) * spd;
+        p.heading = Math.atan2(dx / dist, dz / dist);
+        p.walkPhase += dt * p.speed * 3.2;
+      }
     }
-    p.walkPhase += dt * spd * 3.2;
+    const parts = p.mesh.userData.parts;
+    const moving = p.flee > 0 || p.pause <= 0;
+    const swing = moving ? Math.sin(p.walkPhase) * (p.flee > 0 ? 0.8 : 0.5) : 0;
+    parts.legL.rotation.x = swing;
+    parts.legR.rotation.x = -swing;
+    parts.armL.rotation.x = -swing * 0.8;
+    parts.armR.rotation.x = swing * 0.8;
     p.mesh.position.set(p.x, 0, p.z);
-    p.mesh.rotation.y = p.axis === 'x' ? (p.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (p.dir > 0 ? 0 : Math.PI);
-    const swing = Math.sin(p.walkPhase) * 0.55;
-    p.mesh.userData.legL.rotation.x = swing;
-    p.mesh.userData.legR.rotation.x = -swing;
-    p.mesh.userData.armL.rotation.x = -swing * 0.7;
-    p.mesh.userData.armR.rotation.x = swing * 0.7;
+    p.mesh.rotation.y = p.heading;
   }
 }

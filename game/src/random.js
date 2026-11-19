@@ -1,3 +1,5 @@
+// SOLARA BAY — seeded RNG so the city, traffic and pedestrians are
+// identical on every load for a given seed (deterministic screenshots).
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -16,7 +18,7 @@ export function shuffle(rng, arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
-    const t = a[i]; a[i] = a[j]; a[j] = t;
+    [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
 }

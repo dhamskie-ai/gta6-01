@@ -38,67 +38,51 @@
   #cash { font-size: 30px; font-weight: bold; color: #3ddc5a; line-height: 1.1; }
   #clock { font-size: 14px; color: #fff; }
   #wanted-state { font-size: 11px; color: #ff5f5f; font-weight: bold; display: none; }
-  #weapon-slots { display: flex; gap: 4px; justify-content: flex-end; margin-top: 6px; }
-  .slot { background: rgba(10,12,22,0.72); border: 1px solid rgba(255,255,255,0.16); border-radius: 5px;
-    padding: 3px 6px; font-size: 10px; text-align: center; min-width: 52px; }
-  .slot.active { border-color: #ffd23f; background: rgba(255,210,63,0.18); }
-  .slot-key { color: #ffd23f; font-weight: bold; margin-right: 3px; }
-  .slot-ammo { display: block; color: #ffd23f; font-weight: bold; }
-  #police-list { position: absolute; top: 158px; right: 14px; width: 250px; padding: 8px 10px; display: none; }
-  .pl-head { font-size: 12px; font-weight: bold; color: #ff8080; border-bottom: 1px solid rgba(255,255,255,0.16); padding-bottom: 4px; margin-bottom: 4px; }
-  .pl-row { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-  .pl-tag { font-weight: bold; padding: 0 6px; border-radius: 3px; font-size: 10px; }
-  .pl-tag.ram { background: #c22e2e; color: #fff; }
-  .pl-tag.pur { background: #b8860b; color: #fff; }
-  .pl-tag.spot { background: #2563eb; color: #fff; }
-  .pl-more { font-size: 11px; color: #c8c8d8; margin-top: 3px; }
-  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; width: 200px; text-align: center; }
-  #minimap { width: 200px; height: 200px; border-radius: 50%; border: 3px solid #37c8e8; background: #20262e; }
-  #district-name { font-family: Georgia, serif; font-style: italic; color: #ffd23f; font-size: 17px; margin-top: 4px; text-shadow: 1px 1px 2px #000; }
-  #respect-bar { height: 6px; background: rgba(255,255,255,0.18); border-radius: 3px; margin-top: 3px; overflow: hidden; }
-  #respect-fill { height: 100%; width: 20%; background: linear-gradient(90deg, #ffd23f, #ff2e7e); }
-  #respect-label { font-size: 11px; color: #fff; margin-top: 2px; letter-spacing: 0.5px; }
-  #dialogue { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
-    display: none; align-items: center; gap: 10px; padding: 10px 14px; max-width: 560px; }
-  #dialogue-portrait { width: 56px; height: 56px; border-radius: 6px; flex: none;
-    display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
-  #dialogue-name { font-size: 12px; color: #ffd23f; font-weight: bold; letter-spacing: 0.5px; }
+  #weapon-slots { font-size: 11px; color: #c8c8d8; margin-top: 4px; }
+  #police-list { position: absolute; top: 190px; right: 14px; width: 260px; padding: 8px 10px;
+    font-size: 12px; line-height: 1.5; display: none; border-left: 4px solid #ff5f5f; }
+  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; text-align: center; }
+  #minimap { border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); background: #101c26; }
+  #district-name { font-size: 13px; font-weight: bold; margin-top: 4px; text-shadow: 0 1px 3px #000; }
+  #respect-bar { height: 4px; width: 180px; margin: 4px auto 2px; background: rgba(255,255,255,0.2); border-radius: 2px; }
+  #respect-fill { height: 100%; width: 0%; background: #ffd23f; border-radius: 2px; }
+  #respect-label { font-size: 10px; color: #ffd23f; letter-spacing: 1px; }
+  #dialogue { position: absolute; left: 50%; transform: translateX(-50%); bottom: 24px; width: 560px;
+    padding: 10px 14px; display: none; gap: 12px; align-items: center; }
+  #dialogue-portrait { width: 44px; height: 44px; border-radius: 50%; background: #ff2e7e; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: bold; flex-shrink: 0; }
+  #dialogue-name { font-size: 12px; color: #ffd23f; font-weight: bold; letter-spacing: 1px; }
   #dialogue-text { font-size: 15px; line-height: 1.35; }
-  #radio { position: absolute; right: 14px; bottom: 128px; padding: 7px 12px; text-align: right; }
+  #radio { position: absolute; right: 14px; bottom: 14px; padding: 8px 12px; text-align: right; }
   #radio-station { color: #ff8fd6; font-weight: bold; font-size: 14px; }
-  #radio-track { font-size: 12px; color: #e8e8f2; }
-  #speed-box { position: absolute; right: 14px; bottom: 14px; padding: 8px 14px; text-align: right; min-width: 190px; }
-  #speed-car { font-size: 13px; font-weight: bold; letter-spacing: 0.5px; }
-  #speed-condition { font-size: 10px; color: #c8c8d8; display: flex; align-items: center; gap: 5px; justify-content: flex-end; }
-  #speed-condition-bar { flex: 1; height: 5px; background: rgba(255,255,255,0.18); border-radius: 3px; overflow: hidden; max-width: 110px; }
-  #speed-condition-fill { height: 100%; width: 100%; background: #3ddc5a; }
-  #speed-row { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; }
-  #speed-value { font-size: 46px; font-weight: bold; line-height: 1; }
-  #speed-unit { font-size: 13px; color: #c8c8d8; }
-  #speed-gear { background: #ffd23f; color: #111; font-weight: bold; border-radius: 4px; padding: 2px 7px; font-size: 13px; }
-  #prompt { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%);
-    background: rgba(10,12,22,0.8); border: 1px solid #ffd23f; border-radius: 6px;
-    padding: 6px 14px; font-size: 14px; font-weight: bold; display: none; }
-  #toast { position: absolute; left: 50%; top: 90px; transform: translateX(-50%);
-    background: rgba(10,12,22,0.85); border: 1px solid rgba(255,255,255,0.25); border-radius: 6px;
-    padding: 7px 16px; font-size: 14px; font-weight: bold; display: none; transition: opacity 0.4s; }
-  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: linear-gradient(160deg, rgba(20,10,40,0.88), rgba(10,20,40,0.9)); z-index: 10; text-align: center; }
+  #radio-track { font-size: 12px; color: #fff; }
+  #speed-box { position: absolute; right: 14px; bottom: 84px; padding: 8px 12px; text-align: right; display: none; }
+  #speed-car { color: #ffd23f; font-weight: bold; font-size: 13px; }
+  #speed-condition { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #c8c8d8; justify-content: flex-end; }
+  #speed-condition-bar { width: 90px; height: 5px; background: rgba(255,255,255,0.18); border-radius: 3px; }
+  #speed-condition-fill { height: 100%; width: 100%; background: #3ddc5a; border-radius: 3px; }
+  #speed-row { font-size: 26px; font-weight: bold; }
+  #speed-unit { font-size: 13px; color: #c8c8d8; margin-left: 4px; }
+  #speed-gear { font-size: 13px; color: #8dff9e; margin-left: 8px; }
+  #prompt { position: absolute; left: 50%; transform: translateX(-50%); bottom: 150px; padding: 6px 14px;
+    background: rgba(10,12,22,0.8); border: 1px solid rgba(255,255,255,0.25); border-radius: 16px;
+    font-size: 14px; font-weight: bold; display: none; }
+  #toast { position: absolute; left: 50%; transform: translateX(-50%); top: 110px; padding: 8px 16px;
+    background: rgba(10,12,22,0.85); border: 1px solid #ffd23f; border-radius: 8px;
+    font-size: 15px; font-weight: bold; color: #ffd23f; display: none; }
+  .overlay { position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: rgba(6, 8, 18, 0.55); text-align: center; }
   .overlay h1 { font-size: 64px; letter-spacing: 6px; color: #ff2e7e; text-shadow: 0 0 24px rgba(255,46,126,0.6); }
-  .overlay h2 { font-size: 20px; color: #ffd23f; letter-spacing: 2px; margin: 6px 0 18px; }
-  .overlay p { color: #d8d8e8; max-width: 560px; line-height: 1.5; margin-bottom: 8px; }
-  .overlay button { pointer-events: auto; background: #ff2e7e; color: #fff; border: none; border-radius: 6px;
-    font-size: 17px; font-weight: bold; padding: 11px 30px; margin: 6px; cursor: pointer; }
-  .overlay button.secondary { background: #2a2f3a; }
-  .overlay button:hover { filter: brightness(1.2); }
-  #controls { font-size: 13px; color: #b8b8cc; line-height: 1.7; margin: 10px 0 16px; }
-  #save-info { font-size: 13px; color: #8dff9e; margin-bottom: 8px; }
-  #end-title { font-size: 56px; }
-  #pause-screen, #end-screen { display: none; }
+  .overlay h2 { font-size: 20px; letter-spacing: 4px; color: #ffd23f; }
+  .overlay p { max-width: 520px; font-size: 15px; line-height: 1.5; color: #e8e8f2; }
+  #save-info { font-size: 13px; color: #8dff9e; }
+  #controls { font-size: 13px; color: #c8c8d8; line-height: 1.7; }
+  button { pointer-events: auto; cursor: pointer; font-size: 16px; font-weight: bold; letter-spacing: 1px;
+    padding: 12px 28px; border: none; border-radius: 8px; background: #ff2e7e; color: #fff; }
+  button.secondary { background: rgba(255,255,255,0.16); }
+  button:hover { filter: brightness(1.15); }
 </style>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
 </head>
 <body>
 <div id="game-container"></div>
@@ -150,9 +134,9 @@
 
 <div id="title-screen" class="overlay">
   <h1>SOLARA BAY</h1>
-  <h2>OPEN-WORLD · MALECÓN CELESTE · CELESTE 98.1</h2>
-  <p>Nico pulang ke Solara Bay dengan utang dan satu mobil pink curian.
-     Curi, balapan, kabur dari PCPD — dan bantu Marco membawa kapal Lupe pergi saat Golden Hour.</p>
+  <h2>MAKE GTA 6 · MALECÓN CELESTE</h2>
+  <p>Nico pulang ke Solara Bay dengan utang pada fixer Sal Vega. Curi mobil,
+  kabur dari PCPD, dan selesaikan 8 job bersama Marco — sampai Golden Hour.</p>
   <div id="save-info"></div>
   <div>
     <button id="btn-new">NEW GAME</button>
@@ -185,6 +169,9 @@
   </div>
 </div>
 
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
