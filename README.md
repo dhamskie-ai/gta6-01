@@ -1,31 +1,43 @@
-# SOLARA BAY
+# SOLARA BAY — Make GTA 6 (gta6-01)
 
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+Open-world crime game 3D (three.js) di kota pantai fiktif Solara Bay.
+Nico pulang ke kota, bekerja untuk Marco (wheelman) dan Lupe (client),
+melarikan diri dari PCPD di boulevard Malecón Celeste — 8 misi sampai
+finale Golden Hour.
 
-Entered in the [make.fun bounty](https://make.fun/bounty/gta6-01) "Make GTA 6" ($1,666 in USDC, top 100).
-
-**SOLARA BAY** is an open-world crime game in the desktop browser (three.js, offline, no network requests). You're **Nico**, a getaway driver back in Solara Bay, in debt to fixer Sal Vega. Work 8 jobs for the crew — courier runs, dock heists, a neon tail, and the **Golden Hour** finale: lose the PCPD manhunt before Marco's boat sails. Steal cars, dodge the helicopter, fish off the pier, race on the Malecón, and catch the sunset.
-
-## How to play
-
-- **WASD** move / drive · **Mouse** look · **SHIFT** run / handbrake · **SPACE** jump
-- **E** enter / steal car, talk, fish, buy, respray · **Click** shoot · **1–5** weapons · **R** reload
-- **M** mute · **ESC** pause · **F3** FPS · **C** camera distance
-
-Systems: on-foot + driving (8 car models), traffic + pedestrians, wanted 0–5 with PCPD cars, foot cops, roadblocks and a helicopter, 8 story missions + taxi fares, stunt jumps, 30 sun coins, fishing, street races and a beach party, fists + 4 guns, shops (Cal's Guns, Spray & Shine), HUD with circular minimap, radio CELESTE 98.1, day–night cycle with golden-hour sunsets, and localStorage saves.
-
-## Run it
+## Main
 
 ```sh
-node serve.ts
-# open http://localhost:8080
+node serve.ts        # http://localhost:8080/game/
 ```
 
-## Screenshots
+WASD jalan/nyetir, mouse kamera, E curi mobil / interaksi, Shift lari /
+handbrake, Space lompat, klik kiri tinju / tembak, R reload, 1–5 senjata,
+C kamera, M mute, Esc pause.
 
-1. `1-chase.jpg` — Golden Hour finale: wanted ★★★★, PCPD response list, helicopter, Marco on the radio
-2. `2-drive.jpg` — Golden-hour drive down the Malecón to meet Marco at Marlin Ceviche
-3. `3-street.jpg` — On foot in Old Solara, meeting Marco
-4. `4-night.jpg` — Neon Nights tail job in Marina Bay
+## Sistem
+
+- Kota 600×600 m, 7 distrik, ~120 bangunan, palem, neon, mercusuar,
+  dermaga, pantai, kios pasar, jetski
+- 8 mobil prosedural (termasuk Veloz Comet RS, Solara Bus, taco truck),
+  traffic + pejalan kaki AI
+- Wanted 0–5 PCPD: mobil kejar, polisi jalan kaki, helikopter, roadblock
+- 8 misi cerita + balap jalanan, pesta pantai, mancing, taksi, sun coin
+- HUD: panel misi, daftar PCPD, minimap lingkaran, dialog, radio
+  CELESTE 98.1, speedometer
+- Siklus siang–malam, golden hour, suara WebAudio sintetis
+
+## Screenshot
+
+```sh
+node tools/shot.mjs     # 4 scene ke screenshots/
+node tools/playtest.mjs # title → jalan → curi → kendara
+```
+
+## Dossier
+
+```sh
+MAKEFUN_OUTPUT_DIR=out node main.ts
+```
+
+Lisensi MIT.

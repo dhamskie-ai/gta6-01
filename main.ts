@@ -1,33 +1,22 @@
-// SOLARA BAY — make.fun gta6-01 entry program (Node 22, stdlib only).
-// Hands in the game beside this file: copies game/ and screenshots/ into
-// the output dir and writes dossier.json with the vendored make.fun lib.
-// Local check: mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// SOLARA BAY — entrypoint dossier: salin game/ + screenshots/ ke output,
+// tulis dossier.json via buildDossier kit (cap gate yang sama).
+import { buildDossier } from "./vendor/makefun-game.ts";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-game.ts';
-
-const root = fileURLToPath(new URL('.', import.meta.url));
-const dest = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-
-mkdirSync(dest, { recursive: true });
-cpSync(join(root, 'game'), join(dest, 'game'), { recursive: true });
-mkdirSync(join(dest, 'screenshots'), { recursive: true });
-if (existsSync(join(root, 'screenshots'))) {
-  cpSync(join(root, 'screenshots'), join(dest, 'screenshots'), { recursive: true });
-}
-
-// Gate caps from the competition (reference/gate.json): text shapes the
-// dossier bytes; the rest refuse entries the scorer would refuse.
-writeFileSync(
-  join(dest, 'dossier.json'),
-  buildDossier(dest, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
-);
-console.log('dossier written to', join(dest, 'dossier.json'));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR || "out";
+await mkdir(outDir, { recursive: true });
+await cp("game", outDir + "/game", { recursive: true, force: true });
+await cp("screenshots", outDir + "/screenshots", { recursive: true, force: true });
+const CAPS = {
+  text_max_bytes: 163840,
+  dossier_max_bytes: 1572864,
+  game_max_bytes: 50331648,
+  game_max_files: 993,
+  index_max_bytes: 1048576,
+  shot_max_bytes: 262144,
+};
+const dossier = await buildDossier(".", CAPS);
+// buildDossier mengembalikan dossier.json sebagai bytes (Uint8Array) —
+// tulis langsung, JANGAN JSON.stringify (akan mengacak byte jadi objek indeks).
+await writeFile(outDir + "/dossier.json", dossier);
+console.log("dossier written: " + outDir + "/dossier.json (" + dossier.length + " bytes)");

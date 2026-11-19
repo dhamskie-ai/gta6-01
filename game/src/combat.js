@@ -1,147 +1,186 @@
-// Combat: fists + 4 guns, guards, health/armor, shops, pickups.
-import * as THREE from 'three';
-import { CONFIG } from './config.js';
-import { mulberry32, range, pick, chance, clamp } from './random.js';
+// Combat: tinju, senjata, musuh, health/armor, pickup.
+import { WEAPONS } from './config.js';
+import { clamp, dist2 } from './random.js';
+import { damagePlayer } from './vehicles.js';
 
-export function createCombat(G) {
-  const r = mulberry32(G.seed + 17);
-  const enemies = [];
-  let cooldown = 0, lastShotT = -99, reloading = false, reloadT = 0;
-  let mouseDown = false, mousePressed = false;
-  addEventListener('mousedown', (e) => { if (e.button === 0) { mouseDown = true; mousePressed = true; } });
-  addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
-  function guardFigure() {
-    const g = new THREE.Group();
-    const mat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.34), mat); body.position.y = 1.1; g.add(body);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), new THREE.MeshLambertMaterial({ color: 0xc89878 })); head.position.y = 1.72; g.add(head);
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), new THREE.MeshLambertMaterial({ color: 0x111111 })); gun.position.set(0.3, 1.2, 0.4); g.add(gun);
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.2), mat); legL.position.set(-0.15, 0.33, 0); g.add(legL);
-    const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
-    G.scene.add(g);
-    return { group: g, legL, legR };
+export function initCombat(G) {
+  G.weapons = {};
+  for (const [k, w] of Object.entries(WEAPONS)) {
+    G.weapons[k] = { ...w, ammo: w.ammo, mag: w.ammo };
   }
-  function spawnGuard(x, z) {
-    const f = guardFigure();
-    const e = { ...f, x, z, hp: 50, heading: 0, shootT: range(r, 1, 2), phase: 0 };
-    f.group.position.set(x, 0, z);
-    enemies.push(e); return e;
-  }
-  function clearEnemies() {
-    for (const e of [...enemies]) { G.scene.remove(e.group); enemies.splice(enemies.indexOf(e), 1); }
-  }
-  function curWeapon() { return G.weapons[G.weaponIndex]; }
-  function hurtPlayer(dmg, src) {
-    if (G.phase !== 'play') return;
-    if (G.armor > 0) { const ab = Math.min(G.armor, dmg); G.armor -= ab; dmg -= ab; }
-    G.health -= dmg;
-    G.hud.flashDamage();
-    if (G.health <= 0) { G.health = 0; G.phase = 'dead'; G.missions.failMission('K.O. — Nico is down.'); }
-  }
-  function fire() {
-    const w = curWeapon();
-    if (cooldown > 0 || reloading) return;
-    if (w.id === 'fists') {
-      cooldown = w.rate; G.audio.punch();
-      const rangeM = 2.4;
-      let best = null, bd = rangeM;
-      for (const e of enemies) { const d = Math.hypot(e.x - G.player.x, e.z - G.player.z); if (d < bd) { bd = d; best = e; } }
-      for (const c of G.police.cops) { const d = Math.hypot(c.x - G.player.x, c.z - G.player.z); if (d < bd) { bd = d; best = c; } }
-      if (best) {
-        if (best.hp !== undefined) { best.hp -= w.dmg; G.render.burst(best.x, 1.4, best.z, 0xff5a5a, 8); if (best.hp <= 0) killEnemy(best); }
-        else { G.police.addWanted(2); G.scene.remove(best.group); G.police.cops.splice(G.police.cops.indexOf(best), 1); }
-      }
+  G.weapon = 1;
+  G.shootCd = 0; G.reloadT = 0;
+  G.enemies = [];
+  G.pickups = [];
+}
+
+export function switchWeapon(G, n) {
+  const w = G.weapons[n];
+  if (!w) return;
+  if (w.locked && !w.owned) { G.hud.ticker('KESTREL terkunci — selesaikan misi 7 dulu.'); return; }
+  if (!w.owned) {
+    if (G.cash >= w.price) {
+      G.cash -= w.price; w.owned = true;
+      G.hud.ticker(w.name + ' dibeli — $' + w.price.toLocaleString('en-US'));
+      G.audio.jingle();
+    } else {
+      G.hud.ticker(w.name + ' butuh $' + w.price.toLocaleString('en-US') + ' — uang kurang.');
       return;
     }
-    if (w.ammo <= 0) { reload(); return; }
-    cooldown = w.rate; w.ammo--;
-    lastShotT = G.time;
-    G.audio.shot();
-    G.police.addWanted(1);
-    const yaw = G.player.camYaw, pitch = -G.player.camPitch;
-    const ox = G.player.x, oy = G.player.y + 1.5, oz = G.player.z;
-    const dx = Math.sin(yaw) * Math.cos(pitch), dy = Math.sin(pitch), dz = Math.cos(yaw) * Math.cos(pitch);
-    let hitD = 120;
-    for (const e of enemies) {
-      const d = Math.hypot(e.x - ox, e.z - oz);
-      const along = (e.x - ox) * dx + (e.z - oz) * dz;
-      if (along > 0 && along < hitD && Math.abs((e.x - ox) * dz - (e.z - oz) * dx) < 1.6) { hitD = along; e.hp -= w.dmg; if (e.hp <= 0) killEnemy(e); }
-    }
-    for (const c of G.police.cops) {
-      const along = (c.x - ox) * dx + (c.z - oz) * dz;
-      if (along > 0 && along < hitD && Math.abs((c.x - ox) * dz - (c.z - oz) * dx) < 1.6) { hitD = along; G.police.addWanted(1); G.scene.remove(c.group); G.police.cops.splice(G.police.cops.indexOf(c), 1); }
-    }
-    G.render.tracer(ox, oy, oz, ox + dx * hitD, oy + dy * hitD, oz + dz * hitD);
-    G.render.burst(ox + dx * hitD, oy + dy * hitD, oz + dz * hitD, 0xffca7a, 6);
   }
-  function killEnemy(e) {
-    G.render.burst(e.x, 1.2, e.z, 0xff5a5a, 18);
-    G.scene.remove(e.group);
-    enemies.splice(enemies.indexOf(e), 1);
-    G.missions?.onGuardKilled?.(e);
+  G.weapon = n;
+  G.audio.click();
+}
+
+export function spawnGuard(G, THREE, x, z) {
+  const mesh = makeGuardMesh(THREE);
+  mesh.position.set(x, 0, z);
+  G.scene.add(mesh);
+  const g = { mesh, x, z, yaw: 0, hp: 50, speed: 2.6, shootCd: 1.5, dead: false };
+  G.enemies.push(g);
+  return g;
+}
+
+function makeGuardMesh(THREE) {
+  const g = new THREE.Group();
+  const suit = new THREE.MeshLambertMaterial({ color: 0x3a3f4a });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.05, 0.4), suit);
+  body.position.y = 1.05; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), skin);
+  head.position.y = 1.82; g.add(head);
+  const shade = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.12),
+    new THREE.MeshLambertMaterial({ color: 0x11151c }));
+  shade.position.set(0, 1.86, 0.24); g.add(shade);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.85, 0.24), suit);
+  legL.position.set(-0.17, 0.42, 0); g.add(legL);
+  const legR = legL.clone(); legR.position.x = 0.17; g.add(legR);
+  g.userData = { legL, legR };
+  return g;
+}
+
+export function spawnPickups(G, THREE, city) {
+  const spots = [
+    { kind: 'health', x: 60, z: 120 }, { kind: 'armor', x: -60, z: -120 },
+    { kind: 'health', x: 180, z: 0 }, { kind: 'armor', x: -180, z: 180 },
+    { kind: 'health', x: -240, z: 30 }, { kind: 'armor', x: 120, z: 180 },
+  ];
+  for (const s of spots) {
+    const color = s.kind === 'health' ? 0x2aff5e : 0x37e0ff;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8),
+      new THREE.MeshBasicMaterial({ color }));
+    m.position.set(s.x, 1, s.z);
+    G.scene.add(m);
+    G.pickups.push({ ...s, mesh: m, taken: false });
   }
-  function reload() {
-    const w = curWeapon();
-    if (w.id === 'fists' || w.ammo >= w.max || reloading) return;
-    reloading = true; reloadT = 1.1;
-  }
-  // pickups
-  const pickups = [];
-  function addPickup(kind, x, z) {
-    const col = kind === 'health' ? 0x5dff8f : 0x5ad8ff;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshBasicMaterial({ color: col }));
-    m.position.set(x, 0.9, z); G.scene.add(m);
-    pickups.push({ kind, mesh: m, x, z });
-  }
-  addPickup('health', 40, -100); addPickup('armor', -100, 140); addPickup('health', 200, 100);
-  return {
-    enemies, lastShotT: -99,
-    firedRecently() { return G.time - lastShotT < 6; },
-    spawnGuard, clearEnemies, hurtPlayer, reload,
-    curWeapon,
-    buyWeapon(id) {
-      const w = G.weapons.find((v) => v.id === id);
-      if (!w || w.owned || G.cash < w.price) return false;
-      G.cash -= w.price; w.owned = true; w.ammo = w.max;
-      if (id === 'kestrel') w.locked = false;
-      return true;
-    },
-    update(dt) {
-      cooldown = Math.max(0, cooldown - dt);
-      if (reloading) { reloadT -= dt; if (reloadT <= 0) { const w = curWeapon(); w.ammo = w.max; reloading = false; } }
-      if (G.input.pressed('KeyR')) reload();
-      for (let i = 1; i <= 5; i++) if (G.input.pressed('Digit' + i)) { const w = G.weapons[i - 1]; if (w.owned && !w.locked) { G.weaponIndex = i - 1; G.audio.click(); } }
-      if (mouseDown && G.phase === 'play') {
-        const w = curWeapon();
-        if (w.auto) fire();
-        else if (mousePressed) fire();
-      }
-      mousePressed = false;
-      // guards AI
-      for (const e of [...enemies]) {
-        const d = Math.hypot(G.player.x - e.x, G.player.z - e.z);
-        e.heading = Math.atan2(G.player.x - e.x, G.player.z - e.z);
-        e.group.rotation.y = e.heading;
-        e.phase += dt * 4;
-        e.legL.rotation.x = Math.sin(e.phase) * 0.5; e.legR.rotation.x = -Math.sin(e.phase) * 0.5;
-        if (d > 3) { e.x += Math.sin(e.heading) * 3.4 * dt; e.z += Math.cos(e.heading) * 3.4 * dt; e.group.position.set(e.x, 0, e.z); }
-        e.shootT -= dt;
-        if (e.shootT <= 0 && d < 42) {
-          e.shootT = range(r, 1.4, 2.4);
-          G.audio.shot();
-          if (chance(r, 0.35)) hurtPlayer(range(r, 4, 9));
-          G.render.tracer(e.x, 1.3, e.z, G.player.x, G.player.y + 1.2, G.player.z);
-        }
-      }
-      // pickups
-      for (const p of pickups) {
-        p.mesh.rotation.y += dt;
-        if (Math.hypot(G.player.x - p.x, G.player.z - p.z) < 1.8) {
-          if (p.kind === 'health') G.health = Math.min(100, G.health + 40);
-          else G.armor = Math.min(100, G.armor + 50);
-          G.audio.coin(); G.scene.remove(p.mesh); pickups.splice(pickups.indexOf(p), 1);
-        }
-      }
-    },
+}
+
+function nearestTarget(G, maxD) {
+  const px = G.player.x, pz = G.player.z;
+  let best = null, bd = maxD * maxD;
+  const consider = (t) => {
+    if (t.dead || t.hp <= 0) return;
+    const d2 = dist2(t.x, t.z, px, pz);
+    if (d2 < bd) { bd = d2; best = t; }
   };
+  for (const e of G.enemies) consider(e);
+  for (const c of G.footCops) consider(c);
+  return best;
+}
+
+export function updateCombat(G, dt, input, camera) {
+  G.shootCd -= dt;
+  if (G.reloadT > 0) {
+    G.reloadT -= dt;
+    if (G.reloadT <= 0) {
+      const w = G.weapons[G.weapon];
+      w.mag = w.ammo;
+      G.hud.ticker(w.name + ' terisi ulang.');
+    }
+  }
+  const w = G.weapons[G.weapon];
+  const firing = input.clicked || (w.auto && input.keys.has('Mouse0'));
+  if (firing && G.shootCd <= 0 && G.reloadT <= 0 && G.phase === 'play') {
+    if (G.weapon === 1) {
+      const t = nearestTarget(G, 2.4);
+      G.audio.punch();
+      G.shootCd = w.rate;
+      if (t) {
+        t.hp -= w.dmg;
+        G.renderFx.burst(t.x, 1.4, t.z, 0xff5a5a, 6);
+        if (t.hp <= 0) killTarget(G, t);
+      }
+    } else if (w.mag > 0) {
+      w.mag -= 1;
+      G.audio.shot();
+      G.shootCd = w.rate;
+      G.fleeUntil = performance.now() + 2500;
+      const t = nearestTarget(G, 60);
+      const from = { x: G.player.x, y: 1.5, z: G.player.z };
+      let to = null;
+      if (t) {
+        const d = Math.sqrt(dist2(t.x, t.z, G.player.x, G.player.z)) || 1;
+        to = { x: t.x, y: 1.4, z: t.z };
+        t.hp -= w.dmg;
+        G.renderFx.burst(t.x, 1.4, t.z, 0xff5a5a, 8);
+        if (t.hp <= 0) killTarget(G, t);
+      } else {
+        const yaw = G.player.inCar ? G.playerCar.yaw : G.player.yaw;
+        to = { x: G.player.x + Math.sin(yaw) * 40, y: 1.4, z: G.player.z + Math.cos(yaw) * 40 };
+      }
+      G.renderFx.tracer(from, to);
+      G.renderFx.muzzle(from);
+      if (w.mag === 0) G.hud.ticker(w.name + ' kosong — tekan R.');
+    } else {
+      G.audio.click();
+      G.shootCd = 0.3;
+    }
+  }
+  // musuh: kejar + tembak
+  for (const e of G.enemies) {
+    if (e.dead) continue;
+    const dx = G.player.x - e.x, dz = G.player.z - e.z;
+    const d = Math.sqrt(dx * dx + dz * dz) || 1;
+    e.yaw = Math.atan2(dx, dz);
+    if (d > 8) { e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt; }
+    e.shootCd -= dt;
+    if (d < 26 && e.shootCd <= 0) {
+      e.shootCd = 1.6;
+      G.audio.shot();
+      if (!G.shotMode && Math.random() < 0.4) damagePlayer(G, 6);
+      G.renderFx.tracer({ x: e.x, y: 1.5, z: e.z }, { x: G.player.x, y: 1.4, z: G.player.z });
+    }
+    e.mesh.position.set(e.x, 0, e.z);
+    e.mesh.rotation.y = e.yaw;
+    const sw = Math.sin(performance.now() / 180 + e.x) * 0.4;
+    e.mesh.userData.legL.rotation.x = sw;
+    e.mesh.userData.legR.rotation.x = -sw;
+  }
+  // pickup
+  for (const p of G.pickups) {
+    if (p.taken) continue;
+    p.mesh.rotation.y += dt * 2;
+    const d2 = dist2(p.x, p.z, G.player.x, G.player.z);
+    if (d2 < 2.2 * 2.2) {
+      p.taken = true; p.mesh.visible = false;
+      if (p.kind === 'health') { G.health = clamp(G.health + 40, 0, 100); G.hud.ticker('Health +40'); }
+      else { G.armor = clamp(G.armor + 50, 0, 100); G.hud.ticker('Armor +50'); }
+      G.audio.jingle();
+    }
+  }
+  // asap mobil rusak
+  for (const car of G.cars) {
+    if (!car.isPlayer || car.dead) continue;
+    if (car.hp < car.maxHp * 0.4 && Math.random() < dt * 6) {
+      G.renderFx.burst(car.x, 1.2, car.z, 0x666666, 3);
+    }
+  }
+}
+
+function killTarget(G, t) {
+  t.dead = true;
+  G.renderFx.burst(t.x, 1.2, t.z, 0xff5a5a, 14);
+  if (t.mesh) t.mesh.visible = false;
+  G.stats.kills = (G.stats.kills || 0) + 1;
+  if (G.mission && G.mission.onKill) G.mission.onKill(G, t);
 }
