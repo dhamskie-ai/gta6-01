@@ -14,11 +14,9 @@ import { createMissions, startMission, updateMissions } from './missions.js';
 import { createHud, updateHud, showTitle, showPause, showGameOver, saveGameData, loadGameData, missionName } from './hud.js';
 import { createRender, updateDayNight, createEffects, loadQuality, saveQuality, applyQuality, updateDynamicRes } from './render.js';
 import { setupShot } from './shots.js';
-
 const query = new URLSearchParams(location.search);
 const seed = parseInt(query.get('seed') || '1', 10) || 1;
 const shot = query.get('shot');
-
 const G = {
   rng: makeRng(seed),
   seed,
@@ -38,10 +36,14 @@ const G = {
   footPolice: [],
   peds: [],
   trafficPeds: [],
+  raceCars: [],
+  foodTrucks: [],
   playerCar: null,
   coins: [],
   lastShotT: -99,
   muzzleT: 0,
+  _eventMsg: '',
+  _eventT: 0,
   stats: { carsStolen: 0, coins: 0, maxWanted: 0, playTime: 0, missionsDone: 0 },
 };
 G.player = {
@@ -62,11 +64,8 @@ G.spawnPed = (x, z) => spawnPed(G, x, z);
 G.addWanted = (n, reason) => addWanted(G, n, reason);
 G.input = createInput(document.getElementById('scene'));
 G.audio = createAudio();
-
 G.quality = loadQuality();
 createRender(G, { shotMode: !!shot, quality: G.quality });
-// Pause-menu changes land here: persist the preset, apply it to the
-// renderer, and keep the menu controls in sync with the stored values.
 G.applyQuality = () => {
   saveQuality(G.quality);
   applyQuality(G);
@@ -80,10 +79,7 @@ createPlayerMesh(G);
 spawnTrafficWorld(G);
 createCombat(G);
 createMissions(G);
-
-// The mission 1 sedan, parked on the street right by the spawn point.
 spawnCar(G, 'sedan', 2.5, 36, 0, 'parked');
-
 G.explodeCar = (car) => {
   G.effects.burst(car.x, 1.5, car.z, 0xff8800, 26);
   G.effects.burst(car.x, 1.0, car.z, 0x555555, 14);
@@ -100,7 +96,6 @@ G.explodeCar = (car) => {
     G.hud.toast('Your car blew up!');
   }
 };
-
 G.busted = () => {
   if (G.phase !== 'play') return;
   G.phase = 'over';
@@ -160,8 +155,6 @@ G.continueGame = () => {
   G.stats.playTime = data.playTime || 0;
   G.stats.missionsDone = Math.min(data.mission || 0, 5);
   G.startPlaying();
-  // Keep the saved mission inside 0–5, so a save made on mission 6
-  // (Harbor Lights) picks up there and never past the final mission.
   startMission(G, Math.min(data.mission, 5));
 };
 G.resumeGame = () => {
@@ -188,41 +181,30 @@ G.retryMission = () => {
   startMission(G, G.mission.index);
 };
 G.restartMission = G.retryMission;
-
 createHud(G);
 G.hud.showObjective('Welcome to Solara Bay');
-
 if (shot) {
   setupShot(G, shot);
 } else {
   showTitle(G, !!loadGameData());
 }
-
-// Live summary for the playtest and screenshot tooling.
 window.__game = {
   phase: 'title', wanted: 0, cash: 150, mission: '—',
   position: [2, 24], speed: 0, health: 100, onFoot: true,
 };
 window.__G = G;
 window.__shotReady = false;
-
 const frameClock = new THREE.Clock();
 let saveTimer = 0;
-
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, frameClock.getDelta());
   G.time += dt;
-  // Smoothed frame rate: feeds the FPS readout and the dynamic
-  // resolution scaler. The loop is delta-time based throughout, so no
-  // gameplay logic depends on the frame rate itself.
   const instFps = dt > 0.001 ? 1 / dt : 60;
   G._fps = G._fps ? G._fps * 0.95 + instFps * 0.05 : instFps;
   const keys = G.input;
-
   if (G.phase === 'play') {
     G.stats.playTime += dt;
-    // Pause, mute and headlights.
     if (keys.wasPressed('Escape')) {
       G.phase = 'pause';
       showPause(G, true);
@@ -238,12 +220,9 @@ function frame() {
       saveQuality(G.quality);
       G.hud.toast(G.quality.showFps ? 'FPS counter on' : 'FPS counter off');
     }
-
     if (G.playerCar) updatePlayerCar(G, dt);
     else updatePlayerOnFoot(G, dt);
     updateCamera(G, dt);
-
-    // E takes a car, gets in, or steps out of one.
     if (keys.wasPressed('KeyE')) {
       if (G.playerCar) {
         exitCar(G);
@@ -261,14 +240,12 @@ function frame() {
     updateHud(G, dt);
     updateWheelInstances(G);
     updateCityFx(G, dt);
-    // Quiet auto-save whenever Ro walks into the garage.
     saveTimer += dt;
     if (saveTimer > 10) {
       saveTimer = 0;
       if (Math.hypot(G.player.pos.x + 60, G.player.pos.z + 30) < 10) G.saveGame();
     }
   } else {
-    // Title, pause and game-over screens: drift slowly around downtown.
     G.camYaw += dt * 0.03;
     G.camera.position.set(Math.sin(G.camYaw) * 120, 70, Math.cos(G.camYaw) * 120);
     G.camera.lookAt(0, 0, 0);
@@ -277,13 +254,10 @@ function frame() {
     updateWheelInstances(G);
     updateCityFx(G, dt);
   }
-
   updateDayNight(G, dt);
   G.effects.update(dt);
   updateDynamicRes(G, dt);
   G.renderer.render(G.scene, G.camera);
-
-  // A shot counts as ready after a few settled frames.
   if (shot) {
     G.shotFrames = (G.shotFrames || 0) + 1;
     if (G.shotFrames >= 3) window.__shotReady = true;
@@ -299,9 +273,7 @@ function frame() {
   live.health = Math.round(G.player.health);
   live.onFoot = G.player.onFoot;
   live.cars = G.cars.length;
-
   if (G.snapCamera) {
-    // First frame after a shot is staged: drop the chase camera in place.
     updateCamera(G, 1);
     G.camera.position.set(
       G.player.pos.x + Math.sin(G.camYaw) * (G.playerCar ? G.camDist + 4 : G.camDist),

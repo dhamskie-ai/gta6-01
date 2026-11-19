@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { collideBuildings } from './city.js';
-
 export function createPlayerMesh(G) {
   const g = new THREE.Group();
   const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6f8e });
@@ -10,15 +9,19 @@ export function createPlayerMesh(G) {
   const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.32), jacket);
   body.position.y = 1.1; body.castShadow = true; g.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.12, 0.34),
+    new THREE.MeshLambertMaterial({ color: 0xffd23f }));
+  stripe.position.y = 1.28; g.add(stripe);
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), skin);
   head.position.y = 1.7; head.castShadow = true; g.add(head);
   const hair = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
   hair.position.y = 1.9; g.add(hair);
+  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.1),
+    new THREE.MeshLambertMaterial({ color: 0x14161a }));
+  shades.position.set(0, 1.86, 0.16); g.add(shades);
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.22), pants);
   legL.position.set(-0.15, 0.38, 0); g.add(legL);
   const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
-  // Shoes, a belt, a jacket collar, a ponytail and a shoulder strap —
-  // small boxes, but Ro stops reading as a plain mannequin up close.
   const shoeMat = new THREE.MeshLambertMaterial({ color: 0x1a1210 });
   for (const sx of [-0.15, 0.15]) {
     const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.32), shoeMat);
@@ -35,7 +38,6 @@ export function createPlayerMesh(G) {
   const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.17), jacket);
   armL.position.set(-0.37, 1.1, 0); g.add(armL);
   const armR = armL.clone(); armR.position.x = 0.37; g.add(armR);
-  // Pistol in the right hand when armed.
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.42), new THREE.MeshLambertMaterial({ color: 0x14161a }));
   gun.position.set(0.37, 0.82, 0.22); gun.name = 'gun'; gun.visible = false; g.add(gun);
   g.position.copy(G.player.pos);
@@ -44,7 +46,6 @@ export function createPlayerMesh(G) {
   G.playerParts = { legL, legR, armL, armR, gun };
   return g;
 }
-
 export function updatePlayerOnFoot(G, dt) {
   const p = G.player;
   const input = G.input;
@@ -53,7 +54,6 @@ export function updatePlayerOnFoot(G, dt) {
   G.camPitch = Math.max(-0.4, Math.min(0.7, G.camPitch + dy * 0.0022));
   if (input.wheel) G.camDist = Math.max(4, Math.min(12, G.camDist + input.wheel * 0.01));
   if (input.wasPressed('KeyC')) G.camDist = G.camDist > 7 ? 5 : 9;
-
   const run = input.down('ShiftLeft') || input.down('ShiftRight');
   const speed = run ? CONFIG.runSpeed : CONFIG.walkSpeed;
   let mx = 0, mz = 0;
@@ -72,7 +72,6 @@ export function updatePlayerOnFoot(G, dt) {
     p.yaw = Math.atan2(wx, wz);
     p.walkPhase += dt * (run ? 13 : 9);
   }
-  // Jump + gravity.
   if (input.wasPressed('Space') && p.pos.y <= 0.01) p.vy = CONFIG.jumpSpeed;
   p.vy -= CONFIG.gravity * dt;
   p.pos.y += p.vy * dt;
@@ -83,15 +82,11 @@ export function updatePlayerOnFoot(G, dt) {
   parts.armL.rotation.x = -swing * 0.7; parts.armR.rotation.x = swing * 0.7;
   parts.gun.visible = p.weapon === 1;
   G.playerMesh.position.copy(p.pos);
-  // A little bounce in the step and a forward lean at a run, so the
-  // walk cycle reads in the third-person camera instead of gliding.
   if (moving) G.playerMesh.position.y = p.pos.y + Math.abs(Math.sin(p.walkPhase)) * 0.05;
   G.playerMesh.rotation.x = moving && run ? 0.08 : 0;
   G.playerMesh.rotation.y = p.yaw;
   G.audio.setEngine(0, false);
 }
-
-// Chase camera: behind the player (or car), smoothed, mouse orbit.
 export function updateCamera(G, dt) {
   const p = G.player;
   const input = G.input;
@@ -101,7 +96,6 @@ export function updateCamera(G, dt) {
     G.camPitch = Math.max(-0.2, Math.min(0.6, G.camPitch + dy * 0.0022));
     if (input.wheel) G.camDist = Math.max(6, Math.min(16, G.camDist + input.wheel * 0.01));
     if (input.wasPressed('KeyC')) G.camDist = G.camDist > 10 ? 7 : 13;
-    // Auto-align behind the car when driving without mouse input.
     if (Math.abs(dx) < 0.5 && Math.abs(G.playerCar.speed) > 3) {
       let target = G.playerCar.yaw + Math.PI;
       let diff = target - G.camYaw;

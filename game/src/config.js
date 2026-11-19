@@ -1,5 +1,5 @@
-// SOLARA BAY — every tunable number lives here: movement, driving,
-// shop prices, how the wanted system behaves, the day clock, city size.
+// SOLARA BAY — every tunable number: movement, driving, prices,
+// wanted behaviour, the day clock, city size, beach life.
 export const CONFIG = {
   cityHalf: 300,
   streetStep: 60,
@@ -15,7 +15,7 @@ export const CONFIG = {
   carReverseMax: 12,
   carDrag: 0.6,
   trafficCount: 20,
-  pedCount: 36,
+  pedCount: 30,
   parkedCount: 16,
   wantedDecayHidden: 10,
   wantedClearHidden: 20,
@@ -25,28 +25,28 @@ export const CONFIG = {
   taxiFare: 60,
   jumpReward: 80,
   coinValue: 25,
-  // Length of one full day-night cycle, in seconds.
+  fishMin: 10,
+  fishMax: 40,
+  raceEvery: 75,
   dayLength: 480,
   maxWanted: 5,
 };
-
 export const CAR_MODELS = {
-  sedan:   { color: 0x3f6fb5, len: 4.4, wid: 1.9, name: 'Cometa',    top: 34, accel: 1.0,  grip: 1.0 },
-  hatch:   { color: 0xd94f3d, len: 3.8, wid: 1.8, name: 'Pip',       top: 30, accel: 0.95, grip: 1.1 },
-  taxi:    { color: 0xf2c200, len: 4.4, wid: 1.9, name: 'Cabro',     top: 32, accel: 1.0,  grip: 1.0 },
-  van:     { color: 0x7a7f85, len: 5.0, wid: 2.1, name: 'Mula',      top: 26, accel: 0.8,  grip: 0.9 },
-  sport:   { color: 0xff2e7e, len: 4.5, wid: 2.0, name: 'Veloce GT', top: 46, accel: 1.35, grip: 1.25 },
-  truck:   { color: 0x2e7d5b, len: 6.2, wid: 2.3, name: 'Hauler',    top: 24, accel: 0.7,  grip: 0.85 },
+  sedan:    { color: 0x3f6fb5, len: 4.4, wid: 1.9, name: 'Cometa',     top: 34, accel: 1.0,  grip: 1.0 },
+  hatch:    { color: 0xd94f3d, len: 3.8, wid: 1.8, name: 'Pip',        top: 30, accel: 0.95, grip: 1.1 },
+  taxi:     { color: 0xf2c200, len: 4.4, wid: 1.9, name: 'Cabro',      top: 32, accel: 1.0,  grip: 1.0 },
+  van:      { color: 0x7a7f85, len: 5.0, wid: 2.1, name: 'Mula',       top: 26, accel: 0.8,  grip: 0.9 },
+  sport:    { color: 0xff2e7e, len: 4.5, wid: 2.0, name: 'Veloce GT',  top: 46, accel: 1.35, grip: 1.25 },
+  truck:    { color: 0x2e7d5b, len: 6.2, wid: 2.3, name: 'Hauler',     top: 24, accel: 0.7,  grip: 0.85 },
+  bus:      { color: 0x2e7dc2, len: 8.0, wid: 2.4, name: 'Solara Bus', top: 22, accel: 0.6,  grip: 0.8 },
+  foodtruck:{ color: 0xff8a3d, len: 5.2, wid: 2.2, name: 'Taco Truck', top: 24, accel: 0.75, grip: 0.85 },
 };
-
-// Extra paint jobs for traffic and parked cars, so the streets stop
-// looking like a six-car fleet. Taxis and trucks keep their work colours.
 export const PAINT_COLORS = [
   0xc23b2e, 0x2e7dc2, 0x3fae5a, 0xd8a02a, 0x8a5fc2, 0xe8e8e8,
   0x2c2f36, 0xd94f8a, 0x3fb5a8, 0xb56a2e, 0x6a8a3a, 0x9a3ad8,
 ];
-
 export const DISTRICTS = [
+  { name: 'Coral Strand', test: (x, z) => x < -258, style: 'beach' },
   { name: 'Marina Bay',  test: (x, z) => x < -180, style: 'marina' },
   { name: 'The Docks',   test: (x, z) => x > 180, style: 'docks' },
   { name: 'Vista Hills', test: (x, z) => z < -180, style: 'hills' },
@@ -54,14 +54,12 @@ export const DISTRICTS = [
   { name: 'Old Solara',  test: (x, z) => z > 60 && Math.abs(x) <= 180, style: 'oldsolara' },
   { name: 'Calle Verde', test: () => true, style: 'verde' },
 ];
-
 export function districtAt(x, z) {
   for (const district of DISTRICTS) {
     if (district.test(x, z)) return district;
   }
   return DISTRICTS[DISTRICTS.length - 1];
 }
-
 export const MISSIONS = [
   {
     id: 1, name: 'First Gear', reward: 150,
@@ -119,7 +117,6 @@ export const MISSIONS = [
     ],
   },
 ];
-
 export const TAXI_SPOTS = [
   [-150, 120],
   [150, -120],
@@ -137,6 +134,12 @@ export const SHOP_POS = {
   spray: [-60, 30],
   garage: [-60, -30],
 };
+export const FISH_SPOT = [-338, 0];
+export const PARTY_POS = [-280, 60];
+export const FOOD_TRUCK_SPOTS = [
+  [-268, 80],
+  [-24, 156],
+];
 export const PED_NAMES = [
   'Ana', 'Beto', 'Cleo', 'Dario', 'Elsa',
   'Finn', 'Gia', 'Hugo', 'Ines', 'Joel',

@@ -1,12 +1,9 @@
 // Renderer: scene, lights, warm sunset sky, sun glow, drifting clouds,
-// fog, particles, explosions. Sharpness: screenshots render supersampled
-// (pixel ratio 3, ~4K backing store) with antialiasing on, while live
-// play uses a quality setting (Low/Medium/High/Ultra + 4K toggle) with
-// dynamic resolution scaling that sheds pixels when the frame rate sags.
+// night stars, fog, particles, explosions. Sharpness: screenshots
+// render supersampled (pixel ratio 3, ~4K backing store) with
+// antialiasing on, while live play uses a quality setting (Low/Medium/
+// High/Ultra + 4K toggle) with dynamic resolution scaling that sheds
 import * as THREE from 'three';
-
-// Soft radial disc, drawn once on a canvas and reused for the sun glow,
-// the neon halos and the cloud puffs.
 function glowTexture(inner, outer) {
   const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
   const g = cv.getContext('2d');
@@ -17,7 +14,6 @@ function glowTexture(inner, outer) {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-
 const QUALITY_KEY = 'solarabay-quality-v1';
 const QUALITY_LEVELS = {
   low: { pr: 1, shadows: false, shadowSize: 1024 },
@@ -25,9 +21,6 @@ const QUALITY_LEVELS = {
   high: { pr: 2, shadows: true, shadowSize: 1024 },
   ultra: { pr: 2, shadows: true, shadowSize: 2048 },
 };
-
-// Quality preference kept in localStorage; bad or missing data falls
-// back to High with the 4K toggle off and dynamic scaling on.
 export function loadQuality() {
   const fallback = { level: 'high', fourK: false, showFps: false, drs: true };
   try {
@@ -41,16 +34,10 @@ export function loadQuality() {
 export function saveQuality(q) {
   try { localStorage.setItem(QUALITY_KEY, JSON.stringify(q)); } catch { /* private mode */ }
 }
-
-// Highest pixel ratio the current settings allow. The 4K toggle lifts
-// the cap to 3x, which on a 1280-wide view is a 3840-wide backing store.
 export function qualityCap(q) {
   if (q.fourK) return 3;
   return QUALITY_LEVELS[q.level || 'high'].pr;
 }
-
-// Apply a quality preset to the live renderer: pixel-ratio cap and
-// whether the sun casts shadows at all.
 export function applyQuality(G) {
   const q = G.quality || loadQuality();
   const level = QUALITY_LEVELS[q.level || 'high'];
@@ -64,10 +51,6 @@ export function applyQuality(G) {
     G.lights.sun.shadow.map = null;
   }
 }
-
-// Dynamic resolution scaling: when the frame rate stays low, step the
-// pixel ratio down a notch; when it recovers, step back up toward the
-// cap. Never runs in shot mode, where the ratio is fixed for the capture.
 export function updateDynamicRes(G, dt) {
   if (G._shotMode || !G.renderer || !G.quality || G.quality.drs === false) return;
   if (G._drsCooldown === undefined) G._drsCooldown = 0;
@@ -84,16 +67,12 @@ export function updateDynamicRes(G, dt) {
     G._drsCooldown = 2;
   }
 }
-
 export function createRender(G, opts = {}) {
   const shotMode = !!opts.shotMode;
   const canvas = document.getElementById('scene');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   G.quality = opts.quality || loadQuality();
   if (shotMode) {
-    // A capture only needs a handful of frames, so spend the pixels:
-    // 3x on a 1280x720 view is a 3840x2160 backing store, and the
-    // browser downsamples it into a much crisper JPEG.
     G._shotMode = true;
     G._prCap = 3;
     G._prCur = 3;
@@ -116,8 +95,6 @@ export function createRender(G, opts = {}) {
   });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87b5d6);
-  // Fog sits far out now: distant towers used to dissolve into haze
-  // while they were still clearly visible on the map.
   scene.fog = new THREE.Fog(0x9ab8cc, 240, 820);
   const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 900);
   camera.position.set(0, 8, -14);
@@ -132,7 +109,6 @@ export function createRender(G, opts = {}) {
   scene.add(hemi);
   const moon = new THREE.DirectionalLight(0x8aa8ff, 0);
   scene.add(moon); scene.add(moon.target);
-  // Big warm glow that rides with the sun and swells at golden hour.
   const glowTex = glowTexture('rgba(255, 190, 110, 1)', 'rgba(255, 120, 60, 0)');
   const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTex, transparent: true, opacity: 0.22, depthWrite: false,
@@ -140,9 +116,12 @@ export function createRender(G, opts = {}) {
   }));
   sunGlow.scale.set(180, 180, 1);
   scene.add(sunGlow);
-  // Fourteen cloud puffs in mixed sizes: a few wide flat sheets, a few
-  // tall billows, each with its own base opacity so the sky stops
-  // looking stamped from one shape.
+  const moonGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, transparent: true, opacity: 0, depthWrite: false,
+    blending: THREE.AdditiveBlending, color: 0xbfd0ff,
+  }));
+  moonGlow.scale.set(90, 90, 1);
+  scene.add(moonGlow);
   const cloudTex = glowTexture('rgba(255, 255, 255, 0.85)', 'rgba(255, 255, 255, 0)');
   const clouds = [];
   for (let i = 0; i < 14; i++) {
@@ -156,15 +135,28 @@ export function createRender(G, opts = {}) {
     scene.add(puff);
     clouds.push({ sprite: puff, drift: G.rng.range(1.0, 3.4), baseOp: G.rng.range(0.32, 0.62) });
   }
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(240 * 3);
+  for (let i = 0; i < 240; i++) {
+    const a = G.rng.range(0, Math.PI * 2);
+    const r = G.rng.range(180, 420);
+    starPos[i * 3] = Math.cos(a) * r;
+    starPos[i * 3 + 1] = G.rng.range(120, 380);
+    starPos[i * 3 + 2] = Math.sin(a) * r;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, transparent: true, opacity: 0 });
+  const stars = new THREE.Points(starGeo, starMat);
+  stars.frustumCulled = false;
+  scene.add(stars);
   G.renderer = renderer; G.scene = scene; G.camera = camera;
   G.lights = { sun, hemi, moon };
   G._sunGlow = sunGlow;
+  G._moonGlow = moonGlow;
   G._clouds = clouds;
+  G._stars = stars;
   return { renderer, scene, camera };
 }
-
-// Golden-hour ramp: pale blue mid-afternoon, gold, then orange, then a
-// pink dusk before the night keys take over.
 const SKY_KEYS = [
   [0, 0x0a1026], [5, 0x1a2440], [6.5, 0xf2a35e], [8, 0x87b5d6], [12, 0x7fb2e0],
   [16, 0x8fb8d8], [17.5, 0xf2b25e], [18.5, 0xf2803c], [19.3, 0xe86a8a],
@@ -181,28 +173,22 @@ function skyColorAt(hour) {
   }
   return new THREE.Color(0x87b5d6);
 }
-
-// How deep into sunset we are: 0 at 17:00, 1 at 18:20, back to 0 by 20:00.
 function sunsetFactor(h) {
   if (h < 17 || h >= 20) return 0;
   if (h < 18.33) return (h - 17) / 1.33;
   return 1 - (h - 18.33) / 1.67;
 }
-
 export function updateDayNight(G, dt) {
   const prevHour = G.timeOfDay;
   G.timeOfDay = (G.timeOfDay + (dt * 24) / 480) % 24;
-  if (G.timeOfDay < prevHour) G.day = (G.day || 1) + 1; // midnight wrapped
+  if (G.timeOfDay < prevHour) G.day = (G.day || 1) + 1;
   const h = G.timeOfDay;
   const sky = skyColorAt(h);
   G.scene.background.copy(sky);
   G.scene.fog.color.copy(sky);
-  const isNight = h < 6 || h >= 20; // night starts when the sky key turns dark
+  const isNight = h < 6 || h >= 20;
   const isDay = h >= 7 && h <= 17.5;
   const set = sunsetFactor(h);
-  // Sun position arcs across the sky. Elevation is clamped just above the
-  // horizon: a sun below the ground plane lights nothing from above and
-  // turns every sunset scene pitch black.
   const ang = ((h - 6) / 12) * Math.PI;
   const p = G.player.pos;
   const elev = Math.max(Math.sin(ang), 0.07);
@@ -211,21 +197,25 @@ export function updateDayNight(G, dt) {
   G.lights.sun.target.position.set(p.x, 0, p.z);
   G.lights.sun.intensity = isDay ? 2.2 : isNight ? 0 : 1.2 + set * 0.5;
   G.lights.sun.color.setHex(0xfff2d8).lerp(new THREE.Color(0xff8f3d), set);
-  // Fill is deliberately strong: with ACES tone mapping, shadowed faces
-  // read near-black at the plan's 1.15, so day fill is 1.6 instead.
   G.lights.hemi.intensity = isNight ? 0.35 : isDay ? 1.6 : 1.1;
   G.lights.moon.intensity = isNight ? 0.5 : 0;
   G.lights.moon.position.set(p.x - 100, 160, p.z - 80);
   G.lights.moon.target.position.set(p.x, 0, p.z);
-  // Sun glow tracks the sun far from the player; it swells and warms at dusk.
   if (G._sunGlow) {
     G._sunGlow.position.set(p.x + sunDir.x * 420, 55 + sunDir.y * 160, p.z + sunDir.z * 420);
     G._sunGlow.material.opacity = isNight ? 0 : 0.22 + set * 0.68;
     const s = 180 + set * 170;
     G._sunGlow.scale.set(s, s, 1);
   }
-  // Clouds drift and thin out after dark; each keeps its own base
-  // opacity so the sky keeps its variety at every hour.
+  const nightF = isNight ? 1 : isDay ? 0 : 0.6;
+  if (G._moonGlow) {
+    G._moonGlow.position.set(p.x - 260, 190, p.z - 200);
+    G._moonGlow.material.opacity = nightF * 0.5;
+  }
+  if (G._stars) {
+    G._stars.material.opacity = nightF * 0.9;
+    G._stars.position.set(p.x, 0, p.z);
+  }
   if (G._clouds) {
     const dim = isNight ? 0.32 : isDay ? 1 : 0.68;
     for (const c of G._clouds) {
@@ -234,8 +224,6 @@ export function updateDayNight(G, dt) {
       c.sprite.material.opacity = c.baseOp * dim;
     }
   }
-  // Lamps + neon glow at night (only re-apply when the factor moves).
-  const nightF = isNight ? 1 : isDay ? 0 : 0.6;
   if (G._nightF === undefined || Math.abs(nightF - G._nightF) > 0.02) {
     G._nightF = nightF;
     for (const m of G.city.lampHeads) m.color.setHex(nightF > 0.5 ? 0xffe9a0 : 0x8a8a7a);
@@ -249,17 +237,13 @@ export function updateDayNight(G, dt) {
       }
     });
   }
-  // Headlights at night — and from dusk onward, when the light goes low.
   if (G.playerCar) {
     const on = isNight || G.lightsOn || h > 18.5;
     for (const b of G.playerCar.beams) b.intensity = on ? 60 : 0;
   }
-  // Ferris wheel turns slowly.
   if (G.city.ferris) G.city.ferris.rotation.z += dt * 0.15;
   return isNight;
 }
-
-// Simple particle bursts (explosions, impacts) as point clouds.
 export function createEffects(G) {
   const bursts = [];
   const eff = {
@@ -279,7 +263,6 @@ export function createEffects(G) {
       bursts.push({ pts, vel, life: 0.9 });
     },
     smoke(car) {
-      // Exhaust smoke marker: a fading sprite above the car, updated in main loop.
       const mat = new THREE.SpriteMaterial({ color: 0x555555, transparent: true, opacity: 0.5 });
       const s = new THREE.Sprite(mat);
       s.scale.set(2, 2, 1);
