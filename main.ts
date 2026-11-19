@@ -1,30 +1,30 @@
-// SOLARA BAY — dossier bundle entrypoint for make.fun gta6-01.
-// Copies game/ + screenshots/ beside this file into the output dir and
-// writes dossier.json (file list + source outline + screenshot inventory)
-// via the vendored make.fun library, for `makefun check`.
-// Local run: mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// SOLARA BAY — entrypoint dossier (gta6-01, ronde 6g).
+// Menyalin game/ + screenshots/ dari sebelah file ini ke direktori output
+// lalu menulis dossier.json di sana. Jalankan lokal dengan:
+//   MAKEFUN_OUTPUT_DIR=out node main.ts
+// Di dalam container grader, MAKEFUN_OUTPUT_DIR diganti /output.
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
+mkdirSync(outDir, { recursive: true });
+cpSync(join(here, 'game'), join(outDir, 'game'), { recursive: true });
+mkdirSync(join(outDir, 'screenshots'), { recursive: true });
 if (existsSync(join(here, 'screenshots'))) {
-  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+  cpSync(join(here, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
 }
 
-// The scorer's own caps (reference/gate.json): text_max_bytes shapes the
-// bytes; the others refuse an entry the scorer would refuse (more than 4
-// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB
-// of game files, in all, or a path under game/ over 1000 bytes).
+// Cap scorer (reference/gate.json): text_max_bytes yang membentuk byte
+// dossier; sisanya menolak entry yang scorer akan tolak (lebih dari 4
+// screenshot atau satu di atas 256 KiB; game/ lebih dari 993 file atau
+// 48 MiB, atau satu path di bawah game/ di atas 1000 byte).
 writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
+  join(outDir, 'dossier.json'),
+  buildDossier(outDir, {
     text_max_bytes: 163840,
     screenshots: { max: 4, max_bytes: 262144 },
     game_max_files: 993,
@@ -32,3 +32,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+console.log(`dossier written to ${join(outDir, 'dossier.json')}`);

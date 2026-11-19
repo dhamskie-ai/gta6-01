@@ -1,400 +1,264 @@
-// SOLARA BAY — renderer: scene, sky dome, sun/moon, clouds, birds,
-// particles, tracers and muzzle flashes. Sharpness rules (round 6f):
-// pixelRatio min(dpr,2) + antialias on real hardware, fog pushed far
-// (220–1100 m) so mid-distance buildings stay crisp, and every sky
-// element is drawn with hard edges instead of stretched blur sprites.
-import * as THREE from 'three';
-import { nightFactor } from './city.js';
+// Renderer three.js: langit aesthetic (gradasi + matahari + bulan +
+// awan + bintang), fog 220–1100 m, lampu, bayangan, partikel/efek.
+import { CFG } from './config.js';
+import { clamp, lerp, mulberry32, rr } from './random.js';
 
-// Soft round glow (only used for small glows, never stretched huge).
-function glowTexture() {
-  const c = document.createElement('canvas');
-  c.width = 128; c.height = 128;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
-  return new THREE.CanvasTexture(c);
-}
-
-// Puffy cloud texture: several hard-edged lobes on a 256px canvas, so a
-// cloud sprite keeps visible shape instead of one blurred blob.
-function cloudTexture() {
-  const c = document.createElement('canvas');
-  c.width = 256; c.height = 128;
-  const g = c.getContext('2d');
-  const lobes = [[70, 84, 46], [120, 66, 58], [178, 80, 48], [205, 92, 30], [100, 92, 40], [150, 94, 42]];
-  for (const [x, y, r] of lobes) {
-    const grad = g.createRadialGradient(x, y, r * 0.15, x, y, r);
-    grad.addColorStop(0, 'rgba(255,255,255,0.95)');
-    grad.addColorStop(0.75, 'rgba(255,255,255,0.85)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+function skyColorsAt(hour) {
+  const stops = CFG.skyStops;
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (hour >= stops[i][0] && hour <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break; }
   }
-  g.fillStyle = 'rgba(255,255,255,0.9)';
-  g.fillRect(52, 88, 156, 22);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-const SKY_KEYS = [
-  [0.0, 0x0a0a22, 0x1a1a3a, 0x2a1a3a, 0x8888aa, 0.4, 0.5],
-  [6.0, 0x7fa8d8, 0xbcd4e8, 0xe8d9b0, 0xfff2d0, 1.5, 0.85],
-  [12.0, 0x3f7fd0, 0x8fc3e8, 0xd8e8f0, 0xffffff, 2.2, 1.15],
-  [16.0, 0x5a8fd0, 0xa8c8e0, 0xe8d9b0, 0xfff2d0, 2.0, 1.1],
-  [17.5, 0x6a7fc8, 0xe8a860, 0xf2c078, 0xffb347, 2.3, 1.25],
-  [18.5, 0x4a4a8a, 0xff8f3d, 0xff6a5e, 0xff8f3d, 2.4, 1.2],
-  [19.3, 0x2a2a55, 0xe85a8a, 0xff7a5e, 0xff6a5e, 1.5, 0.9],
-  [20.0, 0x0a0a22, 0x1a1a3a, 0x2a1a3a, 0x8888aa, 0.4, 0.5],
-  [24.0, 0x0a0a22, 0x1a1a3a, 0x2a1a3a, 0x8888aa, 0.4, 0.5],
-];
-
-function skyAt(t) {
-  let a = SKY_KEYS[0], b = SKY_KEYS[SKY_KEYS.length - 1];
-  for (let i = 0; i < SKY_KEYS.length - 1; i++) {
-    if (t >= SKY_KEYS[i][0] && t <= SKY_KEYS[i + 1][0]) { a = SKY_KEYS[i]; b = SKY_KEYS[i + 1]; break; }
-  }
-  const f = (b[0] - a[0]) === 0 ? 0 : (t - a[0]) / (b[0] - a[0]);
-  const mix = (ca, cb) => new THREE.Color(ca).lerp(new THREE.Color(cb), f);
-  return {
-    top: mix(a[1], b[1]), mid: mix(a[2], b[2]), bot: mix(a[3], b[3]),
-    sunCol: mix(a[4], b[4]), sunI: a[5] + (b[5] - a[5]) * f, hemi: a[6] + (b[6] - a[6]) * f,
+  if (hour < stops[0][0]) { a = stops[stops.length - 1]; b = stops[0]; }
+  const span = (b[0] - a[0]) || 1;
+  const t = clamp((hour - a[0]) / span, 0, 1);
+  const mix = (ca, cb) => {
+    const ra = (ca >> 16) & 255, ga = (ca >> 8) & 255, ba = ca & 255;
+    const rb = (cb >> 16) & 255, gb = (cb >> 8) & 255, bb = cb & 255;
+    return ((Math.round(lerp(ra, rb, t)) << 16) | (Math.round(lerp(ga, gb, t)) << 8) | Math.round(lerp(ba, bb, t))) >>> 0;
   };
+  return { top: mix(a[1], b[1]), horizon: mix(a[2], b[2]), fog: mix(a[3], b[3]) };
 }
-
-export function createWorld(container) {
-  let software = false;
-  try {
-    const test = document.createElement('canvas');
-    const tgl = test.getContext('webgl2') || test.getContext('webgl');
-    const ext = tgl && tgl.getExtension('WEBGL_debug_renderer_info');
-    const str = ext ? String(tgl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
-    software = /swiftshader|llvmpipe|softpipe|software/i.test(str);
-    if (tgl) { const lose = tgl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext(); }
-  } catch (err) { /* detection unavailable; assume hardware */ }
+export function createRenderer(W) {
+  const THREE = W.three;
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, software ? 1 : 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = !software;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  container.appendChild(renderer.domElement);
-
+  document.getElementById('game').appendChild(renderer.domElement);
+  W.renderer = renderer;
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x8fc3e8, 220, 1100);
+  W.scene = scene;
   const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
-  camera.position.set(0, 6, -10);
-
-  const skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    uniforms: {
-      topColor: { value: new THREE.Color(0x3f7fd0) },
-      midColor: { value: new THREE.Color(0x8fc3e8) },
-      botColor: { value: new THREE.Color(0xd8e8f0) },
-    },
-    vertexShader: 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `varying vec3 vPos; uniform vec3 topColor; uniform vec3 midColor; uniform vec3 botColor;
-      void main(){ float h = normalize(vPos).y;
-        vec3 c = h > 0.12 ? mix(midColor, topColor, smoothstep(0.12, 0.65, h)) : mix(botColor, midColor, smoothstep(-0.08, 0.12, h));
-        gl_FragColor = vec4(c, 1.0); }`,
-  });
+  camera.position.set(24, 8, 110);
+  W.camera = camera;
+  // Langit: kubah gradasi 3 warna (shader kanvas), matahari, bulan, awan, bintang.
+  const skyCanvas = document.createElement('canvas');
+  skyCanvas.width = 4; skyCanvas.height = 256;
+  const skyTex = new THREE.CanvasTexture(skyCanvas);
+  skyTex.colorSpace = THREE.SRGBColorSpace;
+  const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), skyMat);
   scene.add(sky);
-
-  const sun = new THREE.DirectionalLight(0xffffff, 2.0);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -90; sun.shadow.camera.right = 90;
-  sun.shadow.camera.top = 90; sun.shadow.camera.bottom = -90;
-  sun.shadow.camera.far = 400;
-  sun.shadow.bias = -0.0006;
-  scene.add(sun);
-  scene.add(sun.target);
-  const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x8a7a5a, 1.0);
-  scene.add(hemi);
-
-  const glowTex = glowTexture();
-  // Sharp sun disc: hard-edged circle mesh + a modest glow halo.
-  const sunDisc = new THREE.Mesh(
-    new THREE.CircleGeometry(34, 40),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c8, fog: false, depthWrite: false, depthTest: false, transparent: true, opacity: 0.95 }),
-  );
-  sunDisc.renderOrder = -1;
-  scene.add(sunDisc);
-  const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0xffb347, transparent: true, opacity: 0.3,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-  }));
-  sunGlow.scale.set(220, 220, 1);
-  scene.add(sunGlow);
-  // Moon: pale hard disc visible at night, opposite the sun.
-  const moon = new THREE.Mesh(
-    new THREE.CircleGeometry(22, 32),
-    new THREE.MeshBasicMaterial({ color: 0xe8ecf5, fog: false, depthWrite: false, depthTest: false, transparent: true, opacity: 0 }),
-  );
-  moon.renderOrder = -1;
+  const sun = new THREE.Mesh(new THREE.CircleGeometry(26, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false }));
+  const sunGlow = new THREE.Mesh(new THREE.CircleGeometry(60, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffc86a, transparent: true, opacity: 0.35, fog: false }));
+  scene.add(sun); scene.add(sunGlow);
+  const moon = new THREE.Mesh(new THREE.CircleGeometry(18, 32),
+    new THREE.MeshBasicMaterial({ color: 0xe8ecf5, fog: false }));
   scene.add(moon);
-
-  const cloudTex = cloudTexture();
-  const clouds = [];
-  for (let i = 0; i < 11; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: cloudTex, color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false,
-    }));
-    s.position.set((Math.random() - 0.5) * 700, 120 + Math.random() * 70, (Math.random() - 0.5) * 700);
-    s.scale.set(90 + Math.random() * 110, 34 + Math.random() * 22, 1);
-    scene.add(s);
-    clouds.push({ s, speed: 0.6 + Math.random() * 0.9 });
-  }
-  // Puffy mesh clouds: clusters of flat-shaded spheres, crisp silhouette.
-  const puffMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
-  const puffs = [];
-  for (let i = 0; i < 5; i++) {
-    const grp = new THREE.Group();
-    const n = 4 + Math.floor(Math.random() * 3);
-    for (let j = 0; j < n; j++) {
-      const r = 14 + Math.random() * 16;
-      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), puffMat);
-      m.position.set((j - n / 2) * 22 + Math.random() * 8, Math.random() * 8, Math.random() * 10 - 5);
-      m.scale.y = 0.55;
-      grp.add(m);
+  // Awan: tekstur 256 px bergambar gumpalan berlapis + mesh bola.
+  const cloudTex = new THREE.CanvasTexture((() => {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const g = c.getContext('2d');
+    for (let i = 0; i < 26; i++) {
+      const x = 30 + Math.random() * 196, y = 90 + Math.random() * 76, r = 18 + Math.random() * 42;
+      const grad = g.createRadialGradient(x, y, 2, x, y, r);
+      grad.addColorStop(0, 'rgba(255,255,255,.85)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
     }
-    grp.position.set((Math.random() - 0.5) * 600, 130 + Math.random() * 60, (Math.random() - 0.5) * 600);
-    scene.add(grp);
-    puffs.push({ grp, speed: 0.5 + Math.random() * 0.8 });
-  }
-
-  const starCount = 500;
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const e = Math.random() * 0.9 + 0.08;
-    const r = 820;
-    starPos[i * 3] = Math.cos(a) * Math.cos(e) * r;
-    starPos[i * 3 + 1] = Math.sin(e) * r;
-    starPos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
-  }
-  const starGeo = new THREE.BufferGeometry();
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.8, sizeAttenuation: false, transparent: true, opacity: 0 });
-  const stars = new THREE.Points(starGeo, starsMat);
-  scene.add(stars);
-
-  // Ambient birds: flapping two-triangle wings, flying slow circles.
-  const birds = [];
-  const birdMat = new THREE.MeshBasicMaterial({ color: 0x1c2733, side: THREE.DoubleSide });
+    return c;
+  })());
+  cloudTex.colorSpace = THREE.SRGBColorSpace;
+  const clouds = [];
+  const rng = mulberry32(W.seed + 13);
   for (let i = 0; i < 14; i++) {
-    const g = new THREE.Group();
-    const wingGeo = new THREE.BufferGeometry();
-    wingGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-      0, 0, 0, 1.1, 0, 0.35, 1.1, 0, -0.35,
-    ]), 3));
-    wingGeo.computeVertexNormals();
-    const wl = new THREE.Mesh(wingGeo, birdMat);
-    const wr = new THREE.Mesh(wingGeo, birdMat);
-    wr.scale.x = -1;
-    const body = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.7, 6), birdMat);
-    body.rotation.x = Math.PI / 2;
-    g.add(wl); g.add(wr); g.add(body);
-    g.userData = { wl, wr, flap: Math.random() * 6.28 };
-    scene.add(g);
-    birds.push({
-      g, cx: (Math.random() - 0.5) * 320, cz: (Math.random() - 0.5) * 320,
-      cy: 55 + Math.random() * 45, r: 40 + Math.random() * 90,
-      a: Math.random() * Math.PI * 2, speed: (0.05 + Math.random() * 0.05) * (Math.random() < 0.5 ? 1 : -1),
-      flapSpeed: 7 + Math.random() * 4,
-    });
+    const puff = new THREE.Group();
+    for (let j = 0; j < 4; j++) {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(rr(rng, 9, 18), 10, 8),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, fog: false }));
+      s.position.set(rr(rng, -18, 18), rr(rng, -3, 3), rr(rng, -6, 6));
+      s.scale.y = 0.45;
+      puff.add(s);
+    }
+    puff.position.set(rr(rng, -500, 500), rr(rng, 130, 220), rr(rng, -500, 500));
+    scene.add(puff);
+    clouds.push(puff);
   }
-
-  const PMAX = 420;
+  // Bintang malam: titik-titik tajam.
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = [];
+  for (let i = 0; i < 420; i++) {
+    const a = rng() * Math.PI * 2, e = rr(rng, 0.15, 1.4), r = 850;
+    starPos.push(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r);
+  }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false }));
+  scene.add(stars);
+  // Lampu: matahari directional + hemisphere + lampu depan.
+  const sunLight = new THREE.DirectionalLight(0xfff2d8, 2.4);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.camera.left = -160; sunLight.shadow.camera.right = 160;
+  sunLight.shadow.camera.top = 160; sunLight.shadow.camera.bottom = -160;
+  sunLight.shadow.camera.far = 700;
+  scene.add(sunLight);
+  scene.add(sunLight.target);
+  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x8a7a5a, 0.9);
+  scene.add(hemi);
+  const headlight = new THREE.SpotLight(0xfff2c0, 0, 60, 0.5, 0.4);
+  scene.add(headlight);
+  scene.add(headlight.target);
+  // Partikel: satu Points pool untuk asap / ledakan / cipratan.
+  const P_COUNT = 320;
   const pGeo = new THREE.BufferGeometry();
-  const pPos = new Float32Array(PMAX * 3);
-  const pCol = new Float32Array(PMAX * 3);
-  for (let i = 0; i < PMAX; i++) { pPos[i * 3 + 1] = -999; }
+  const pPos = new Float32Array(P_COUNT * 3);
+  const pCol = new Float32Array(P_COUNT * 3);
   pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
   pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
-  const points = new THREE.Points(pGeo, new THREE.PointsMaterial({
-    size: 0.9, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false,
-  }));
+  const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.9 }));
   points.frustumCulled = false;
   scene.add(points);
   const parts = [];
-  for (let i = 0; i < PMAX; i++) parts.push({ life: 0, max: 1, vx: 0, vy: 0, vz: 0 });
-
+  for (let i = 0; i < P_COUNT; i++) parts.push({ life: 0, x: 0, y: -99, z: 0, vx: 0, vy: 0, vz: 0, r: 1, g: 1, b: 1 });
   const tracers = [];
-  for (let i = 0; i < 12; i++) {
-    const tg = new THREE.BufferGeometry();
-    tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const line = new THREE.Line(tg, new THREE.LineBasicMaterial({
-      color: 0xffe9a8, transparent: true, opacity: 0,
-    }));
-    line.frustumCulled = false;
-    scene.add(line);
-    tracers.push({ line, life: 0 });
-  }
-
-  const flashes = [];
-  for (let i = 0; i < 4; i++) {
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTex, color: 0xffe9a8, transparent: true, opacity: 0,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    }));
-    sp.scale.set(1.6, 1.6, 1);
-    scene.add(sp);
-    flashes.push({ sp, life: 0 });
-  }
-
-  const W = {
-    renderer, scene, camera, sun, hemi, sky, skyMat, sunGlow, clouds, stars, starsMat, software,
-    _pGeo: pGeo, _pPos: pPos, _pCol: pCol, _parts: parts, _tracers: tracers, _flashes: flashes,
-    _flashIdx: 0, _tracerIdx: 0,
-  };
-
-  W.spawnParticles = function (pos, colorHex, n, spread, up) {
-    const c = new THREE.Color(colorHex);
-    let placed = 0;
-    for (let i = 0; i < PMAX && placed < n; i++) {
-      const p = parts[i];
-      if (p.life > 0) continue;
-      p.life = p.max = 0.5 + Math.random() * 0.7;
-      p.vx = (Math.random() - 0.5) * spread * 2;
-      p.vy = Math.random() * (up || 1) + 0.5;
-      p.vz = (Math.random() - 0.5) * spread * 2;
-      pPos[i * 3] = pos.x; pPos[i * 3 + 1] = pos.y; pPos[i * 3 + 2] = pos.z;
-      pCol[i * 3] = c.r; pCol[i * 3 + 1] = c.g; pCol[i * 3 + 2] = c.b;
-      placed++;
-    }
-    pGeo.attributes.color.needsUpdate = true;
-  };
-
-  W.updateParticles = function (dt) {
-    for (let i = 0; i < PMAX; i++) {
-      const p = parts[i];
-      if (p.life <= 0) continue;
-      p.life -= dt;
-      if (p.life <= 0) { pPos[i * 3 + 1] = -999; continue; }
-      p.vy -= 4 * dt;
-      pPos[i * 3] += p.vx * dt;
-      pPos[i * 3 + 1] += p.vy * dt;
-      pPos[i * 3 + 2] += p.vz * dt;
-    }
-    pGeo.attributes.position.needsUpdate = true;
-  };
-
-  W.spawnTracer = function (from, to) {
-    const t = tracers[W._tracerIdx % tracers.length];
-    W._tracerIdx++;
-    const a = t.line.geometry.attributes.position.array;
-    a[0] = from.x; a[1] = from.y; a[2] = from.z;
-    a[3] = to.x; a[4] = to.y; a[5] = to.z;
-    t.line.geometry.attributes.position.needsUpdate = true;
-    t.life = 0.09;
-    t.line.material.opacity = 0.95;
-  };
-
-  W.muzzleFlash = function (pos) {
-    const f = flashes[W._flashIdx % flashes.length];
-    W._flashIdx++;
-    f.sp.position.set(pos.x, pos.y, pos.z);
-    f.sp.scale.set(1.4 + Math.random(), 1.4 + Math.random(), 1);
-    f.life = 0.06;
-    f.sp.material.opacity = 0.95;
-  };
-
-  W.explosion = function (pos) {
-    W.spawnParticles(pos, 0xff8f2a, 34, 3.2, 3.5);
-    W.spawnParticles(pos, 0x555555, 16, 2.2, 2.5);
-    W.spawnParticles(pos, 0xffe9a8, 10, 1.6, 2);
-    W.muzzleFlash({ x: pos.x, y: pos.y + 0.5, z: pos.z });
-  };
-
-  W.updateFx = function (dt) {
-    W.updateParticles(dt);
-    for (const t of tracers) {
-      if (t.life > 0) {
-        t.life -= dt;
-        t.line.material.opacity = Math.max(0, t.life / 0.09) * 0.95;
+  const tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9 });
+  const E = {
+    spawn(x, y, z, vx, vy, vz, life, r, g, b) {
+      const p = parts.find((q) => q.life <= 0);
+      if (!p) return;
+      p.life = life; p.x = x; p.y = y; p.z = z; p.vx = vx; p.vy = vy; p.vz = vz; p.r = r; p.g = g; p.b = b;
+    },
+    spawnSmoke(x, z, n = 1) {
+      for (let i = 0; i < n; i++) E.spawn(x + rr(Math.random, -0.5, 0.5), 1 + Math.random(), z + rr(Math.random, -0.5, 0.5), rr(Math.random, -0.4, 0.4), rr(Math.random, 0.8, 1.6), rr(Math.random, -0.4, 0.4), rr(Math.random, 0.8, 1.4), 0.45, 0.45, 0.48);
+    },
+    explode(x, z) {
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * Math.PI * 2, sp = rr(Math.random, 2, 9);
+        E.spawn(x, 1, z, Math.cos(a) * sp, rr(Math.random, 2, 8), Math.sin(a) * sp, rr(Math.random, 0.5, 1.1), 1, 0.55 + Math.random() * 0.3, 0.12);
       }
-    }
-    for (const f of flashes) {
-      if (f.life > 0) {
-        f.life -= dt;
-        f.sp.material.opacity = Math.max(0, f.life / 0.06) * 0.95;
+      for (let i = 0; i < 10; i++) E.spawn(x, 1, z, rr(Math.random, -1, 1), rr(Math.random, 1, 3), rr(Math.random, -1, 1), rr(Math.random, 1.2, 2), 0.25, 0.25, 0.28);
+    },
+    puff(x, y, z, color) {
+      const r = ((color >> 16) & 255) / 255, g = ((color >> 8) & 255) / 255, b = (color & 255) / 255;
+      for (let i = 0; i < 6; i++) E.spawn(x, y, z, rr(Math.random, -1.5, 1.5), rr(Math.random, -0.5, 1.5), rr(Math.random, -1.5, 1.5), 0.5, r, g, b);
+    },
+    tracer(x1, y1, z1, x2, y2, z2) {
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2),
+      ]);
+      const line = new THREE.Line(geo, tracerMat.clone());
+      scene.add(line);
+      tracers.push({ line, life: 0.12 });
+    },
+    muzzle(x, y, z) {
+      E.spawn(x, y, z, 0, 0, 0, 0.08, 1, 0.9, 0.4);
+      E.spawn(x, y, z, 0.5, 0.3, 0, 0.08, 1, 0.75, 0.3);
+    },
+    update(dt) {
+      for (let i = 0; i < P_COUNT; i++) {
+        const p = parts[i];
+        if (p.life > 0) {
+          p.life -= dt;
+          p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+          p.vy -= 1.5 * dt;
+        } else { p.y = -99; }
+        pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
+        pCol[i * 3] = p.r; pCol[i * 3 + 1] = p.g; pCol[i * 3 + 2] = p.b;
       }
-    }
+      pGeo.attributes.position.needsUpdate = true;
+      pGeo.attributes.color.needsUpdate = true;
+      for (let i = tracers.length - 1; i >= 0; i--) {
+        tracers[i].life -= dt;
+        if (tracers[i].life <= 0) {
+          scene.remove(tracers[i].line);
+          tracers[i].line.geometry.dispose();
+          tracers.splice(i, 1);
+        }
+      }
+    },
   };
-
-  W.updateBirds = function (dt, elapsed, day) {
-    for (const b of birds) {
-      b.a += b.speed * dt;
-      const x = b.cx + Math.cos(b.a) * b.r;
-      const z = b.cz + Math.sin(b.a) * b.r;
-      const y = b.cy + Math.sin(elapsed * 0.7 + b.a * 3) * 3;
-      b.g.position.set(x, y, z);
-      b.g.rotation.y = -b.a - (b.speed > 0 ? 0 : Math.PI);
-      const flap = Math.sin(elapsed * b.flapSpeed + b.g.userData.flap) * 0.7;
-      b.g.userData.wl.rotation.z = flap;
-      b.g.userData.wr.rotation.z = -flap;
-      b.g.visible = day;
-    }
+  W.effects = E;
+  W.render = {
+    sky, skyCanvas, skyTex, sun, sunGlow, moon, clouds, stars,
+    sunLight, hemi, headlight, renderer, camera,
   };
-
-  W.updateSky = function (G, dt, elapsed) {
-    const t = G.timeOfDay;
-    const sky = skyAt(t);
-    W.skyMat.uniforms.topColor.value.copy(sky.top);
-    W.skyMat.uniforms.midColor.value.copy(sky.mid);
-    W.skyMat.uniforms.botColor.value.copy(sky.bot);
-    W.scene.fog.color.copy(sky.mid);
-    W.sun.color.copy(sky.sunCol);
-    W.sun.intensity = sky.sunI;
-    W.hemi.intensity = sky.hemi;
-    const a = (t - 6) / 12 * Math.PI;
-    const dir = new THREE.Vector3(Math.cos(a), Math.sin(a) * 0.9 + 0.12, 0.42).normalize();
-    const px = G.player.x, pz = G.player.z;
-    W.sun.position.set(px + dir.x * 160, Math.max(12, dir.y * 160), pz + dir.z * 160);
-    W.sun.target.position.set(px, 0, pz);
-    const golden = (t >= 17 && t <= 19.3) ? 1 - Math.abs(t - 18.2) / 1.3 : 0;
-    const sunPos = new THREE.Vector3(px + dir.x * 760, Math.max(40, dir.y * 760), pz + dir.z * 760);
-    W.sunGlow.position.copy(sunPos);
-    W.sunGlow.material.opacity = 0.18 + golden * 0.72;
-    W.sunGlow.material.color.setHex(golden > 0.4 ? 0xff8f3d : 0xffe9a8);
-    sunDisc.position.copy(sunPos);
-    sunDisc.lookAt(px, sunPos.y, pz);
-    sunDisc.material.color.setHex(golden > 0.4 ? 0xff9a4d : 0xfff2c8);
-    const nf = nightFactor(t);
-    moon.position.set(px - dir.x * 760, Math.max(60, -dir.y * 760 + 260), pz - dir.z * 760);
-    moon.lookAt(px, moon.position.y, pz);
-    moon.material.opacity = nf * 0.9;
-    W.starsMat.opacity = nf * 0.9;
-    for (const c of W.clouds) {
-      c.s.position.x += c.speed * dt;
-      if (c.s.position.x > 420) c.s.position.x = -420;
-      c.s.material.opacity = 0.85 - nf * 0.6;
-    }
-    for (const p of puffs) {
-      p.grp.position.x += p.speed * dt;
-      if (p.grp.position.x > 420) p.grp.position.x = -420;
-      p.grp.children.forEach((m) => { m.material = puffMat; });
-      puffMat.opacity = 0.9 - nf * 0.65;
-    }
-    W.updateBirds(dt, elapsed, nf < 0.5);
-    W.sky.position.set(px, 0, pz);
-    W.stars.position.set(px, 0, pz);
-  };
-
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
-
-  return W;
+  return W.render;
+}
+export function updateSky(W, dt) {
+  const R = W.render;
+  const hour = W.hour;
+  const cols = skyColorsAt(hour);
+  // Gradasi kubah: gambar ulang strip vertikal 4 px.
+  const g = R.skyCanvas.getContext('2d');
+  const top = `#${cols.top.toString(16).padStart(6, '0')}`;
+  const hor = `#${cols.horizon.toString(16).padStart(6, '0')}`;
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, top); grad.addColorStop(0.55, hor); grad.addColorStop(1, hor);
+  g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
+  R.skyTex.needsUpdate = true;
+  R.sky.material.color.setHex(0xffffff);
+  W.scene.fog.color.setHex(cols.fog);
+  // Matahari / bulan mengikuti jam.
+  const sunAngle = ((hour - 6) / 12) * Math.PI; // 06:00 terbit, 18:00 terbenam
+  const sx = Math.cos(sunAngle) * 800, sy = Math.sin(sunAngle) * 700 + 40;
+  R.sun.position.set(sx, Math.max(30, sy), -500);
+  R.sunGlow.position.copy(R.sun.position);
+  R.sunGlow.position.z += 2;
+  const moonAngle = ((hour - 18) / 12) * Math.PI;
+  R.moon.position.set(Math.cos(moonAngle) * 800, Math.max(60, Math.sin(moonAngle) * 600 + 80), -500);
+  const isDay = hour >= 6 && hour < 18.5;
+  R.sun.visible = isDay; R.sunGlow.visible = isDay;
+  R.moon.visible = !isDay;
+  R.stars.visible = !isDay;
+  R.stars.material.opacity = isDay ? 0 : 1;
+  // Cahaya matahari: siang terang, senja oranye, malam redup.
+  const dayF = isDay ? clamp(Math.sin(sunAngle), 0.25, 1) : 0.12;
+  R.sunLight.intensity = 0.5 + dayF * 1.9;
+  R.sunLight.color.setHex(hour >= 17 && hour < 19 ? 0xffb36a : hour < 7 ? 0xffc98a : 0xfff2d8);
+  R.sunLight.position.set(sx * 0.4, Math.max(120, sy * 0.6), -200);
+  const px = W.player.car ? W.player.car.x : W.player.x;
+  const pz = W.player.car ? W.player.car.z : W.player.z;
+  R.sunLight.target.position.set(px, 0, pz);
+  R.hemi.intensity = isDay ? 0.9 : 0.35;
+  // Awan bergerak pelan.
+  for (const c of R.clouds) {
+    c.position.x += dt * 1.6;
+    if (c.position.x > 560) c.position.x = -560;
+  }
+  // Lampu jalan + lampu depan menyala malam.
+  const night = !isDay;
+  for (const lamp of W.city.lamps) {
+    lamp.material.emissive.setHex(night ? 0xFFD98A : 0x000000);
+  }
+  for (const tl of W.city.trafficLights) {
+    tl.t += dt;
+    const phase = Math.floor(tl.t) % 2;
+    tl.bulbs[0].material.color.setHex(phase === 0 ? 0xff2a2a : 0x551111);
+    tl.bulbs[2].material.color.setHex(phase === 0 ? 0x115511 : 0x2aff5a);
+  }
+  // Mercusuar berputar + kincir ria berputar.
+  if (W.city.lighthouseBeam) W.city.lighthouseBeam.rotation.y += dt * 0.5;
+  if (W.city.ferrisWheel) W.city.ferrisWheel.rotation.z += dt * 0.12;
+  if (W.city.seaTex) W.city.seaTex.offset.y -= dt * 0.01;
+  // Lampu depan mobil pemain.
+  const car = W.player.car;
+  if (car && night) {
+    R.headlight.intensity = 120;
+    const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+    R.headlight.position.set(car.x + fx * 2, 1.2, car.z + fz * 2);
+    R.headlight.target.position.set(car.x + fx * 30, 0, car.z + fz * 30);
+  } else R.headlight.intensity = 0;
+  // Radio ganti lagu tiap 45 detik.
+  if (Math.floor(W.elapsed / 45) !== Math.floor((W.elapsed - dt) / 45)) {
+    W.radioTrack = (W.radioTrack + 1) % CFG.radioTracks.length;
+  }
+}
+export function renderFrame(W) {
+  W.effects.update(1 / 60);
+  W.renderer.render(W.scene, W.camera);
 }

@@ -1,98 +1,57 @@
-// SOLARA BAY — tuning & data tables. All names, places and prices are
-// original fiction for this game; no real-world brands are referenced.
+// Tuning SOLARA BAY (ronde 6g). Semua angka gameplay di satu tempat.
 export const CFG = {
   seed: 1,
-  worldHalf: 300,
-  roads: [-240, -120, 0, 120, 240],
-  roadWidth: 10,
-  sidewalk: 3.5,
-  coastX: -240,
-  seaX: -258,
-  beachX0: -258,
-  beachX1: -246,
-  marlinCeviche: { x: -240, z: 90 },
-  marcoPos: { x: -240, z: 87 },
-  pier: { x: -268, z: 90 },
-  lighthouse: { x: -256, z: -252 },
-  garage: { x: -116, z: -116 },
-  sprayShop: { x: 116, z: 116 },
-  gunShop: { x: 120, z: -116 },
-  taxiStand: { x: 4, z: 116 },
-  playerStart: { x: -232, z: 64 },
-  trafficCount: 20,
-  pedCount: 36,
-  birdCount: 14,
-  parkedCount: 16,
-  walkSpeed: 5.2,
-  runSpeed: 9.5,
-  jumpSpeed: 7.5,
-  gravity: 20,
-  dayStart: 17.0,
-  sunCoinCount: 30,
-  resprayPerStar: 100,
-  wantedDecayUnseen: 10,
-  wantedClearTime: 20,
-  radioStation: 'CELESTE 98.1',
+  mapHalf: 320, // peta 640 x 640 m, pantai di barat (x negatif)
+  // Pemain jalan kaki
+  walkSpeed: 4.2, runSpeed: 7.5, jumpSpeed: 7.5, gravity: 20,
+  playerRadius: 0.55,
+  // Mobil (arcade)
+  carAccel: 16, carBrake: 30, carReverse: 9, carMax: 38, carDrag: 0.35,
+  carTurn: 1.9, carGrip: 6,
+  // Waktu: 1 jam game = 75 detik nyata; mulai 10:00
+  hourLength: 75, startHour: 10,
+  // Wanted / PCPD
+  wantedDecaySeen: 10, wantedDecayHidden: 20, resprayPerStar: 100,
+  // Ekonomi
+  startCash: 250, taxiFare: 120, sunCoinValue: 50, stuntBonus: 200,
+  // Senjata: [nama, harga, peluru/mag, damage, fireRate]
+  weapons: [
+    { name: 'FISTS', price: 0, mag: Infinity, dmg: 12, rate: 0.45, auto: false },
+    { name: 'VESPER 72', price: 0, mag: 12, dmg: 22, rate: 0.22, auto: false },
+    { name: 'MAKO 150', price: 800, mag: 30, dmg: 14, rate: 0.09, auto: true },
+    { name: 'BREAKER', price: 3800, mag: 6, dmg: 65, rate: 0.8, auto: false },
+    { name: 'KESTREL', price: 0, mag: 8, dmg: 90, rate: 1.1, auto: false, locked: true },
+  ],
+  // Dunia
+  trafficCars: 14, peds: 36, birds: 14, sunCoins: 30,
+  spawn: { x: 24, z: 96, heading: -2.78 },
+  // Warna langit per jam (dipakai render.js): [jam, atas, horizon, kabut]
+  skyStops: [
+    [0, 0x0a1030, 0x1c2a55, 0x0d1526], [5, 0x1a2450, 0x7a5a8a, 0x2a2440],
+    [7, 0x5a8fd0, 0xffc98a, 0xc9a06a], [10, 0x3f8fd8, 0xbfe6f5, 0x8fc3e8],
+    [15, 0x3a8ad8, 0xcfeef8, 0x9fd0ea], [17.5, 0x6a5ac0, 0xff9d5c, 0xe8a06a],
+    [18.8, 0x8a4a9a, 0xff7e5e, 0xd86a6a], [20, 0x141c44, 0x3a2a5e, 0x1a2038],
+    [22, 0x070d24, 0x141c3c, 0x0b1020],
+  ],
+  radioTracks: [
+    'Malecón Mirage · Vela Roja', 'Sunset Static · Los Cometas',
+    'Palm Static · DJ Lupe', 'Golden Hour · Nico Vega',
+    'Neon Palms · Marlin Sound', 'Celeste Nights · La Ola',
+  ],
+  pcpdUnits: ['PELICAN-11', 'GECKO-25', 'AIR-1', 'BARRACUDA-18', 'TAC-45',
+    'VIPER-07', 'SHARK-33', 'ORCA-52', 'FALCON-09', 'COBRA-21'],
+  pedNames: ['Ana', 'Beto', 'Carla', 'Dio', 'Elena', 'Felix', 'Gita', 'Hugo',
+    'Ira', 'Jo', 'Kiki', 'Leo', 'Mia', 'Nia', 'Omar', 'Pia', 'Riko', 'Sari'],
 };
-
-export const CAR_DEFS = {
-  cometa: { name: 'COMETA', kind: 'sedan', maxSpeed: 34, accel: 11, brake: 26, turn: 1.9, color: 0x3f6fb5, len: 4.4, wid: 1.9 },
-  pip: { name: 'PIP', kind: 'hatch', maxSpeed: 30, accel: 10, brake: 24, turn: 2.2, color: 0xe8b93a, len: 3.8, wid: 1.8 },
-  cabro: { name: 'CABRO TAXI', kind: 'taxi', maxSpeed: 32, accel: 10.5, brake: 25, turn: 2.0, color: 0xf2c200, len: 4.4, wid: 1.9 },
-  mula: { name: 'MULA', kind: 'van', maxSpeed: 27, accel: 8, brake: 20, turn: 1.6, color: 0x7a7f8a, len: 5.0, wid: 2.0 },
-  veloce: { name: 'VELOZ COMET RS', kind: 'sport', maxSpeed: 48, accel: 15, brake: 30, turn: 2.4, color: 0xff2e7e, len: 4.5, wid: 2.0 },
-  hauler: { name: 'HAULER', kind: 'truck', maxSpeed: 25, accel: 7, brake: 18, turn: 1.3, color: 0x4a7d4f, len: 6.2, wid: 2.2 },
-  bus: { name: 'SOLARA TRANSIT', kind: 'bus', maxSpeed: 24, accel: 6, brake: 16, turn: 1.2, color: 0x2e8fa3, len: 8.0, wid: 2.4 },
-  taco: { name: 'TACO TRUCK', kind: 'truck', maxSpeed: 26, accel: 7.5, brake: 19, turn: 1.4, color: 0xe86a1e, len: 5.2, wid: 2.1 },
-  police: { name: 'PCPD INTERCEPTOR', kind: 'sedan', maxSpeed: 40, accel: 13, brake: 28, turn: 2.1, color: 0x14181f, len: 4.5, wid: 1.95 },
+// Spesifikasi tiap model mobil: [nama, warna, topSpeed, accel, handling, harga]
+export const CAR_KINDS = {
+  cometa: { name: 'COMETA', color: 0x3a7bd5, top: 30, accel: 13, turn: 1.7 },
+  pip: { name: 'PIP', color: 0xe8b93e, top: 26, accel: 12, turn: 2.1 },
+  cabro: { name: 'CABRO TAXI', color: 0xf2c200, top: 29, accel: 12, turn: 1.8 },
+  mula: { name: 'MULA VAN', color: 0x8a94a6, top: 24, accel: 10, turn: 1.4 },
+  veloz: { name: 'VELOZ COMET RS', color: 0xd21f2b, top: 42, accel: 19, turn: 2.2 },
+  hauler: { name: 'HAULER', color: 0x4a6b4f, top: 22, accel: 9, turn: 1.2 },
+  pcpd: { name: 'PCPD INTERCEPTOR', color: 0x1a2a4a, top: 36, accel: 17, turn: 2.0 },
+  bus: { name: 'BUS SOLARA', color: 0x2a9d8f, top: 22, accel: 8, turn: 1.1 },
+  taco: { name: 'TACO TRUCK', color: 0xff8c42, top: 20, accel: 8, turn: 1.2 },
 };
-
-export const WEAPONS = [
-  { id: 'fists', name: 'FISTS', ammo: Infinity, price: 0, locked: false },
-  { id: 'vesper', name: 'VESPER', ammo: 72, price: 0, locked: false },
-  { id: 'mako', name: 'MAKO', ammo: 150, price: 0, locked: false },
-  { id: 'breaker', name: 'BREAKER', ammo: 0, price: 3800, locked: false },
-  { id: 'kestrel', name: 'KESTREL', ammo: 0, price: 0, locked: true },
-];
-
-export const POLICE_CALLSIGNS = [
-  'PELICAN-11', 'GECKO-25', 'AIR-1', 'BARRACUDA-18', 'TAC-45',
-  'IBIS-43', 'TARPON-19', 'HERON-17', 'KESTREL-31', 'MARLIN-26', 'OSPREY-08',
-];
-
-export const RADIO_TRACKS = [
-  'Malecón Mirage — Vela Roja',
-  'Midnight Marina — Vela',
-  'Sunset Strip — The Palms',
-  'Neon Drive — Coral Skies',
-];
-
-export const SHOP_SIGNS = [
-  { text: 'TACOS', fg: '#ffd23f', bg: '#c22e2e' },
-  { text: 'DONUTS', fg: '#ffffff', bg: '#e86aa8' },
-  { text: 'BAR', fg: '#ffe9a8', bg: '#22303f' },
-  { text: 'HOTEL', fg: '#8ef2ff', bg: '#14324a' },
-  { text: 'PIZZA', fg: '#fff3c4', bg: '#a33327' },
-  { text: '24H MART', fg: '#c9ffd6', bg: '#1f6b3a' },
-  { text: 'MARLIN CEVICHE', fg: '#ffe9a8', bg: '#0e5a6b' },
-  { text: 'CELESTE 98.1', fg: '#ffd6f2', bg: '#7a1e6e' },
-];
-
-export const NEON_SIGNS = [
-  { text: 'SOLARA BAY', color: '#ffb347', x: 0, z: -118, face: 'S' },
-  { text: 'MARLIN CEVICHE', color: '#7de3ff', x: -226, z: 96, face: 'E' },
-  { text: 'CELESTE 98.1', color: '#ff8fd6', x: -226, z: 150, face: 'E' },
-  { text: 'SPRAY & SHINE', color: '#8dff9e', x: 118, z: 118, face: 'S' },
-  { text: 'TACOS 24H', color: '#ffd23f', x: 118, z: -118, face: 'S' },
-  { text: 'CAL’S GUNS', color: '#ff9d5c', x: 118, z: -118, face: 'N' },
-  { text: 'VICE HOTEL', color: '#37e0ff', x: -226, z: -30, face: 'E' },
-  { text: 'FLAMINGO FM', color: '#ff5fa2', x: -226, z: 30, face: 'E' },
-];
-
-export const PED_NAMES = [
-  'Ana', 'Beto', 'Celia', 'Dimas', 'Elena', 'Faris', 'Gita', 'Hugo',
-  'Ines', 'Joko', 'Kira', 'Leo', 'Mira', 'Nando', 'Ola', 'Paco',
-  'Rosa', 'Sari', 'Tono', 'Uma', 'Vera', 'Wira', 'Yara', 'Zaki',
-];
-
-export const SAVE_KEY = 'solarabay-save-v1';

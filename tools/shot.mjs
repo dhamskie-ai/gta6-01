@@ -1,84 +1,113 @@
-// SOLARA BAY — screenshot tool (Playwright + headless Chromium).
-// Serves content from localhost:8080 through page.route at the fake host
-// http://solarabay.game/ (Chromium in this VM blocks direct localhost
-// navigation), waits for window.__shotReady, saves 1280x720 JPEG q85.
-// Usage: node tools/shot.mjs [chase|drive|street|night|harbor|all]
-// Requires: `node serve.ts` running on :8080, and /tmp/webgl-policy.txt.
+// Screenshot SOLARA BAY (gta6-01, ronde 6g): Playwright headless dengan
+// Chromium VM, WebGL SwiftShader, game diserve dari disk lewat page.route
+// di host palsu http://solarabay.game/ (host itu yang diizinkan WebGL).
+//   node tools/shot.mjs            -> 4 shot dari shots.json ke screenshots/
+//   node tools/shot.mjs --touch    -> 1 shot mode sentuh ke screenshots-touch/
+// Tiap shot menunggu window.__shotReady lalu menyimpan JPEG 1280x720 q85.
 import { createRequire } from 'node:module';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as crypto from 'node:crypto';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright');
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.dirname(HERE);
+const here = dirname(fileURLToPath(import.meta.url));
+const repo = resolve(here, '..');
+const gameDir = join(repo, 'game');
+const touchOnly = process.argv.includes('--touch');
+
 const POLICY = '/tmp/webgl-policy.txt';
-const ALL = ['chase', 'drive', 'street', 'night'];
-const NAMES = { chase: '1-chase', drive: '2-drive', street: '3-street', night: '4-night', harbor: '5-harbor' };
+const policyText = 'hatch-webgl-allowed-domains-v1\nsolarabay.game\n';
+writeFileSync(POLICY, policyText);
+const policyHash = createHash('sha256').update(policyText).digest('hex');
+const policyCheck = readFileSync(POLICY, 'utf8');
+if (policyCheck !== policyText) throw new Error('webgl policy file mismatch');
 
-const wanted = process.argv[2] && process.argv[2] !== 'all' ? [process.argv[2]] : ALL;
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.css': 'text/css; charset=utf-8',
+};
 
-const policy = fs.readFileSync(POLICY, 'utf8');
-const hash = crypto.createHash('sha256').update(policy).digest('hex');
+const CHROME_ARGS = [
+  '--no-sandbox',
+  '--disable-gpu',
+  '--use-angle=swiftshader',
+  '--enable-unsafe-swiftshader',
+  '--no-proxy-server',
+  '--autoplay-policy=no-user-gesture-required',
+  `--hatch-webgl-allowed-domains-file=${POLICY}`,
+  `--hatch-webgl-allowed-domains-sha256=${policyHash}`,
+];
+const ENV = { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NO_PROXY: '*' };
+
+async function serveRoute(route) {
+  const url = new URL(route.request().url());
+  let rel = decodeURIComponent(url.pathname);
+  if (rel === '/' || rel.endsWith('/')) rel += 'index.html';
+  const file = join(gameDir, rel);
+  if (!file.startsWith(gameDir)) return route.abort();
+  try {
+    const body = readFileSync(file);
+    await route.fulfill({ status: 200, contentType: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', body });
+  } catch {
+    await route.fulfill({ status: 404, body: 'not found' });
+  }
+}
+
+const shots = touchOnly
+  ? [{ name: '5-touch', query: '?shot=drive&seed=1' }]
+  : JSON.parse(readFileSync(join(repo, 'shots.json'), 'utf8')).shots;
+
+const outDir = join(repo, touchOnly ? 'screenshots-touch' : 'screenshots');
+mkdirSync(outDir, { recursive: true });
 
 const browser = await chromium.launch({
   executablePath: '/opt/meta-chromium/chrome',
-  args: [
-    '--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server',
-    `--hatch-webgl-allowed-domains-file=${POLICY}`,
-    `--hatch-webgl-allowed-domains-sha256=${hash}`,
-  ],
-  env: {
-    ...process.env,
-    http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', no_proxy: '*',
-  },
+  args: CHROME_ARGS,
+  env: ENV,
 });
-
-let failures = 0;
-for (const scene of wanted) {
-  const errors = [];
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-  page.on('console', (msg) => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
-  page.on('pageerror', (err) => errors.push('pageerror: ' + String(err)));
-  await page.route('**/solarabay.game/**', async (route) => {
-    const u = new URL(route.request().url());
-    const target = 'http://localhost:8080' + u.pathname + u.search;
-    try {
-      const res = await fetch(target);
-      const body = Buffer.from(await res.arrayBuffer());
-      await route.fulfill({
-        status: res.status,
-        headers: { 'content-type': res.headers.get('content-type') || 'application/octet-stream' },
-        body,
-      });
-    } catch (err) {
-      await route.abort();
-    }
+let failed = 0;
+try {
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 720 },
+    deviceScaleFactor: 1,
+    hasTouch: touchOnly,
+    isMobile: touchOnly,
   });
-  const url = `http://solarabay.game/game/?shot=${scene}&seed=1`;
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  try {
-    await page.waitForFunction(() => window.__shotReady === true, { timeout: 90000 });
-  } catch (err) {
-    errors.push('timeout waiting for __shotReady');
+  const page = await context.newPage();
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await page.route('**/solarabay.game/**', serveRoute);
+
+  for (const shot of shots) {
+    const t0 = Date.now();
+    await page.goto(`http://solarabay.game/${shot.query}`, { waitUntil: 'load', timeout: 120000 });
+    await page.waitForFunction(() => window.__shotReady === true, { timeout: 240000 });
+    if (touchOnly) {
+      await page.waitForFunction(() => {
+        const el = document.querySelector('#touch-ui');
+        return el && getComputedStyle(el).display !== 'none';
+      }, { timeout: 30000 });
+    }
+    await page.waitForTimeout(800);
+    const dest = join(outDir, `${shot.name}.jpg`);
+    await page.screenshot({ path: dest, type: 'jpeg', quality: 85 });
+    const size = (await import('node:fs')).statSync(dest).size;
+    console.log(`${shot.name}.jpg  ${size} bytes  ${((Date.now() - t0) / 1000).toFixed(1)}s  ${size <= 262144 ? 'OK' : 'OVER 256KiB'}`);
+    if (size > 262144) failed++;
   }
-  await page.waitForTimeout(400);
-  const out = path.join(REPO, 'screenshots', `${NAMES[scene] || scene}.jpg`);
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  await page.screenshot({ path: out, type: 'jpeg', quality: 85, timeout: 60000 });
-  const size = fs.statSync(out).size;
-  const state = await page.evaluate(() => (window.__game ? {
-    phase: window.__game.phase, wanted: window.__game.wanted,
-    mission: window.__game.mission, cash: window.__game.cash,
-  } : null));
-  console.log(`${scene}: ${out} ${size} bytes ${size <= 256 * 1024 ? 'OK' : 'TOO BIG'} state=${JSON.stringify(state)} errors=${errors.length}`);
-  for (const e of errors) console.log('  ERR ' + e);
-  if (errors.length || size > 256 * 1024) failures++;
-  await page.close();
+  if (errors.length) { console.log('ERRORS during capture:'); errors.forEach((e) => console.log('  ' + e)); failed++; }
+  else console.log('0 console/page errors');
+} finally {
+  await browser.close();
 }
-await browser.close();
-if (failures) { console.log(`shot.mjs: ${failures} scene(s) failed`); process.exit(1); }
-console.log('shot.mjs: all scenes OK');
+if (failed) process.exit(1);
+console.log('done');

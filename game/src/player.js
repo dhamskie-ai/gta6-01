@@ -1,173 +1,171 @@
-// SOLARA BAY — the on-foot character: detailed low-poly person meshes,
-// walking/jumping, and the third-person chase camera.
-// Round 6f: people are real articulated figures — hair or hat, jacketed
-// torso with a belt, arms with sleeves, trousers, shoes — with skin-tone
-// and outfit variation, so pedestrians read as people, not blurry boxes.
-import * as THREE from 'three';
+// Nico jalan kaki + kamera third-person (chase cam). Mouse / geser jari
+// memutar kamera, C / tombol KAM ganti jarak, E masuk-keluar mobil.
+import { mulberry32 } from './random.js';
+import { makePersonModel } from './traffic.js';
+import { collideBuildings } from './city.js';
+import { updatePlayerCar } from './vehicles.js';
+import { clamp, wrapAngle } from './random.js';
 import { CFG } from './config.js';
-import { collideCircle } from './city.js';
-import { isDown, wasPressed, consumeMouse, consumeWheel } from './input.js';
 
-const SKINS = [0xe8b88a, 0xc98a5e, 0x8a5a34, 0xf2c9a0, 0x6e4426];
-const SHIRTS = [0xff2e7e, 0x2e8fd2, 0xe8b93a, 0x3a9e4f, 0x8a5fd2, 0xff8f3d, 0xe8e8e8, 0x37e0ff, 0xd23c2e];
-const PANTS = [0x22303f, 0x3a3f45, 0x5a4a3a, 0x2a4a6b, 0x6b2a3a];
-const HAIRS = [0x14100c, 0x3a2418, 0x6b6b6b, 0x8a5a2a, 0xd2b48c];
-
-function lam(color) {
-  return new THREE.MeshLambertMaterial({ color });
+export function createPlayer(W) {
+  const rng = mulberry32(W.seed + 5);
+  const group = makePersonModel(W.three, rng, { skin: 0xe8b88a, shirt: 0x2a7bd2, pants: 0x2a2e33, noHat: false });
+  group.position.set(CFG.spawn.x, 0, CFG.spawn.z);
+  W.scene.add(group);
+  // Pistol di tangan kanan (terlihat bila senjata > FISTS).
+  const gun = new W.three.Mesh(new W.three.BoxGeometry(0.09, 0.16, 0.42),
+    new W.three.MeshLambertMaterial({ color: 0x1a1d22 }));
+  gun.position.set(0.34, 0.85, 0.28);
+  gun.visible = false;
+  group.add(gun);
+  const P = {
+    group, gun, x: CFG.spawn.x, z: CFG.spawn.z, y: 0, vy: 0,
+    heading: CFG.spawn.heading, camYaw: CFG.spawn.heading, camPitch: 0.32,
+    camDist: 7, camMode: 0, speed: 0, phase: 0,
+    car: null, onGround: true, walkTarget: null,
+  };
+  W.player = P;
+  return P;
 }
-
-function limb(w, h, d, mat, x, y, z) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  return m;
-}
-
-// colours: { skin, shirt, pants, hair, hat } — all optional.
-export function createPersonMesh(colors) {
-  const c = colors || {};
-  const skin = c.skin !== undefined ? c.skin : SKINS[Math.floor(Math.random() * SKINS.length)];
-  const shirt = c.shirt !== undefined ? c.shirt : SHIRTS[Math.floor(Math.random() * SHIRTS.length)];
-  const pants = c.pants !== undefined ? c.pants : PANTS[Math.floor(Math.random() * PANTS.length)];
-  const hair = c.hair !== undefined ? c.hair : HAIRS[Math.floor(Math.random() * HAIRS.length)];
-  const group = new THREE.Group();
-  const skinMat = lam(skin), shirtMat = lam(shirt), pantsMat = lam(pants), hairMat = lam(hair);
-  // Legs (trousers) + shoes.
-  const legL = limb(0.2, 0.78, 0.24, pantsMat, -0.13, 0.39, 0);
-  const legR = limb(0.2, 0.78, 0.24, pantsMat, 0.13, 0.39, 0);
-  const shoeL = limb(0.22, 0.1, 0.36, lam(0x1a1a1a), -0.13, 0.05, 0.05);
-  const shoeR = limb(0.22, 0.1, 0.36, lam(0x1a1a1a), 0.13, 0.05, 0.05);
-  legL.add(shoeL); shoeL.position.set(0, -0.36, 0.05);
-  legR.add(shoeR); shoeR.position.set(0, -0.36, 0.05);
-  // Torso: jacket + belt stripe + collar.
-  const body = limb(0.56, 0.68, 0.32, shirtMat, 0, 1.12, 0);
-  const belt = limb(0.58, 0.09, 0.34, lam(0x14181f), 0, 0.8, 0);
-  const collar = limb(0.4, 0.08, 0.34, lam(0xffffff), 0, 1.44, 0);
-  body.add(belt); belt.position.set(0, -0.3, 0);
-  body.add(collar); collar.position.set(0, 0.34, 0);
-  // Arms with sleeves + hands.
-  const armL = limb(0.16, 0.62, 0.2, shirtMat, -0.37, 1.16, 0);
-  const armR = limb(0.16, 0.62, 0.2, shirtMat, 0.37, 1.16, 0);
-  const handL = limb(0.15, 0.14, 0.18, skinMat, -0.37, 0.82, 0);
-  const handR = limb(0.15, 0.14, 0.18, skinMat, 0.37, 0.82, 0);
-  // Head + hair cap (+ optional hat brim).
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.36, 0.32), skinMat);
-  head.position.set(0, 1.66, 0);
-  head.castShadow = true;
-  const hairM = limb(0.36, 0.14, 0.34, hairMat, 0, 1.88, 0);
-  const hairBack = limb(0.36, 0.2, 0.08, hairMat, 0, 1.78, -0.15);
-  group.add(legL); group.add(legR); group.add(body);
-  group.add(armL); group.add(armR); group.add(handL); group.add(handR);
-  group.add(head); group.add(hairM); group.add(hairBack);
-  if (c.hat) {
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.1, 10), lam(c.hat));
-    hat.position.set(0, 1.96, 0);
-    group.add(hat);
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.03, 10), lam(c.hat));
-    brim.position.set(0, 1.91, 0);
-    group.add(brim);
+export function tryEnterCar(W) {
+  const P = W.player;
+  if (P.car) { exitCar(W); return true; }
+  // Cari mobil terdekat dalam 4,5 m (parkir / traffic / misi).
+  let best = null, bd = 4.5;
+  for (const car of W.cars.list) {
+    if (car.driver === 'police' || car.driver === 'courier' || car.driver === 'rival') continue;
+    const d = Math.hypot(car.x - P.x, car.z - P.z);
+    if (d < bd) { bd = d; best = car; }
   }
-  group.userData.parts = { legL, legR, armL, armR, handL, handR, head, body };
-  return group;
-}
-
-export function createPlayerMesh() {
-  // Nico: red jacket, dark jeans, dark hair — the player is unmistakable.
-  return createPersonMesh({ skin: 0xe8b88a, shirt: 0xd21f4e, pants: 0x22303f, hair: 0x14100c });
-}
-
-export function placePlayer(G, x, z, heading) {
-  G.player.x = x; G.player.z = z;
-  G.player.heading = heading !== undefined ? heading : 0;
-  G.player.vy = 0; G.player.y = 0;
-  G.player.mesh.position.set(x, 0, z);
-  G.player.mesh.rotation.y = heading !== undefined ? heading : 0;
-}
-
-export function updateOnFoot(G, input, dt) {
-  const p = G.player;
-  const run = isDown(input, 'ShiftLeft') || isDown(input, 'ShiftRight');
-  const speed = run ? CFG.runSpeed : CFG.walkSpeed;
-  const fwd = (isDown(input, 'KeyW') || isDown(input, 'ArrowUp') ? 1 : 0)
-    - (isDown(input, 'KeyS') || isDown(input, 'ArrowDown') ? 1 : 0);
-  const strafe = (isDown(input, 'KeyD') || isDown(input, 'ArrowRight') ? 1 : 0)
-    - (isDown(input, 'KeyA') || isDown(input, 'ArrowLeft') ? 1 : 0);
-  const mouse = consumeMouse(input);
-  p.camYaw -= mouse.dx * 0.0032;
-  p.camPitch = Math.max(-0.4, Math.min(0.55, p.camPitch + mouse.dy * 0.0024));
-  const wheel = consumeWheel(input);
-  if (wheel !== 0) p.camDist = Math.max(4, Math.min(14, p.camDist + Math.sign(wheel)));
-  if (wasPressed(input, 'KeyC')) p.camDist = p.camDist > 8 ? 5.5 : 10;
-  const sin = Math.sin(p.camYaw), cos = Math.cos(p.camYaw);
-  let mx = (-sin * fwd + cos * strafe);
-  let mz = (-cos * fwd - sin * strafe);
-  const ml = Math.hypot(mx, mz);
-  if (ml > 0.01) { mx /= ml; mz /= ml; }
-  const nx = p.x + mx * speed * dt;
-  const nz = p.z + mz * speed * dt;
-  if (!collideCircle(G.city, nx, nz, 0.55)) { p.x = nx; p.z = nz; }
-  else if (!collideCircle(G.city, nx, p.z, 0.55)) { p.x = nx; }
-  else if (!collideCircle(G.city, p.x, nz, 0.55)) { p.z = nz; }
-  if (ml > 0.01) p.heading = Math.atan2(mx, mz);
-  // Jump + gravity.
-  if (wasPressed(input, 'Space') && p.y <= 0.01) p.vy = CFG.jumpSpeed;
-  p.vy -= CFG.gravity * dt;
-  p.y += p.vy * dt;
-  if (p.y < 0) { p.y = 0; p.vy = 0; }
-  // Procedural walk swing.
-  p.walkPhase += dt * (ml > 0.01 ? speed * 1.6 : 0);
-  const parts = p.mesh.userData.parts;
-  const swing = ml > 0.01 ? Math.sin(p.walkPhase) * (run ? 0.75 : 0.55) : 0;
-  parts.legL.rotation.x = swing;
-  parts.legR.rotation.x = -swing;
-  parts.armL.rotation.x = -swing * 0.8;
-  parts.armR.rotation.x = swing * 0.8;
-  parts.body.position.y = 1.12 + Math.abs(Math.sin(p.walkPhase)) * 0.05;
-  p.mesh.position.set(p.x, p.y, p.z);
-  p.mesh.rotation.y = p.heading;
-  // Sun coin pickup.
-  for (const c of G.city.coins) {
-    if (!c.taken && Math.hypot(p.x - c.x, p.z - c.z) < 1.6) {
-      c.taken = true;
-      c.mesh.visible = false;
-      G.cash += 50;
-      G.coinsGot = (G.coinsGot || 0) + 1;
-      G.audio.coin();
-    }
+  if (!best) return false;
+  if (best.driver === 'traffic') {
+    // Pengemudi ditarik keluar, kabur.
+    best.driver = 'parked';
+    W.audio.blip(300, 0.15, 'square', 0.25, -100);
   }
-}
-
-export function syncPlayerToCar(G) {
-  const p = G.player;
-  if (!G.car) return;
-  p.x = G.car.x; p.z = G.car.z;
-  p.mesh.position.set(p.x, -2, p.z);
-  p.mesh.visible = false;
-  p.heading = G.car.heading;
-}
-
-export function updateCamera(G, dt) {
-  const W = G.W;
-  const p = G.player;
-  if (G.inCar && G.car) {
-    const c = G.car;
-    const back = 9.5 + Math.abs(c.speed) * 0.06;
-    const tx = c.x - Math.sin(c.heading) * back;
-    const tz = c.z - Math.cos(c.heading) * back;
-    const ty = 4.2 + Math.abs(c.speed) * 0.02;
-    W.camera.position.x += (tx - W.camera.position.x) * Math.min(1, dt * 5);
-    W.camera.position.y += (ty - W.camera.position.y) * Math.min(1, dt * 5);
-    W.camera.position.z += (tz - W.camera.position.z) * Math.min(1, dt * 5);
-    W.camera.lookAt(c.x + Math.sin(c.heading) * 6, 1.6, c.z + Math.cos(c.heading) * 6);
-  } else {
-    const d = p.camDist;
-    const cx = p.x + Math.sin(p.camYaw) * d * Math.cos(p.camPitch);
-    const cz = p.z + Math.cos(p.camYaw) * d * Math.cos(p.camPitch);
-    const cy = 2.2 + Math.sin(p.camPitch) * d + 1.4;
-    W.camera.position.x += (cx - W.camera.position.x) * Math.min(1, dt * 10);
-    W.camera.position.y += (cy - W.camera.position.y) * Math.min(1, dt * 10);
-    W.camera.position.z += (cz - W.camera.position.z) * Math.min(1, dt * 10);
-    W.camera.lookAt(p.x, 1.7 + p.y, p.z);
+  if (best === W.traffic.missionCar && W.missions.current === 0 && !W.missions.flags.stoleVeloz) {
+    W.missions.flags.stoleVeloz = true;
+    W.hud.toast('VELOZ COMET RS dicuri! Antar ke bengkel Mara.');
   }
+  best.driver = 'player';
+  P.car = best;
+  P.group.visible = false;
+  W.audio.engine(true, 0);
+  W.hud.setPrompt('');
+  if (W.police.nearbyPolice(P.x, P.z, 25)) {
+    W.police.addWanted(W, 1, 'curi mobil di depan PCPD');
+  }
+  return true;
+}
+export function exitCar(W) {
+  const P = W.player;
+  if (!P.car) return;
+  const car = P.car;
+  car.driver = 'parked';
+  car.speed = 0;
+  const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+  P.x = car.x - fx * 2.6; P.z = car.z - fz * 2.6;
+  P.heading = car.heading;
+  P.car = null;
+  P.group.visible = true;
+  P.group.position.set(P.x, 0, P.z);
+  W.audio.engine(false);
+}
+export function updatePlayer(W, dt) {
+  const P = W.player;
+  const input = W.input;
+  const look = input.lookDelta();
+  P.camYaw = wrapAngle(P.camYaw - look.dx * 0.0032);
+  P.camPitch = clamp(P.camPitch + look.dy * 0.0022, -0.15, 1.1);
+  if (input.action('camera')) {
+    P.camMode = (P.camMode + 1) % 3;
+    P.camDist = [7, 11, 4.5][P.camMode];
+    W.hud.toast(['Kamera: dekat', 'Kamera: jauh', 'Kamera: kap mesin'][P.camMode]);
+  }
+  if (P.car) {
+    // Mengemudi: joystick / WASD.
+    const axis = input.moveAxis();
+    const ctrl = {
+      throttle: axis.y,
+      steer: -axis.x,
+      brake: input.brake() && axis.y <= 0,
+      handbrake: input.action('handbrake'),
+    };
+    if (input.action('horn')) W.audio.horn();
+    updatePlayerCar(W, P.car, dt, ctrl);
+    W.audio.engine(true, Math.abs(P.car.speed) / P.car.spec.top);
+    if (input.action('enter')) exitCar(W);
+    updateCamera(W, dt);
+    return;
+  }
+  // Jalan kaki.
+  const axis = input.moveAxis();
+  const sprint = input.action('sprint');
+  const speed = sprint ? CFG.runSpeed : CFG.walkSpeed;
+  let mx = 0, mz = 0;
+  if (axis.x !== 0 || axis.y !== 0) {
+    const sin = Math.sin(P.camYaw), cos = Math.cos(P.camYaw);
+    mx = sin * axis.y + cos * axis.x;
+    mz = cos * axis.y - sin * axis.x;
+    const len = Math.hypot(mx, mz) || 1;
+    mx /= len; mz /= len;
+    P.heading = Math.atan2(mx, mz);
+  }
+  const targetSpeed = (axis.x !== 0 || axis.y !== 0) ? speed : 0;
+  P.speed += (targetSpeed - P.speed) * Math.min(1, dt * 10);
+  P.x += mx * P.speed * dt;
+  P.z += mz * P.speed * dt;
+  // Gravitasi + lompat.
+  if (input.action('jump') && P.onGround) { P.vy = CFG.jumpSpeed; P.onGround = false; }
+  P.vy -= CFG.gravity * dt;
+  P.y += P.vy * dt;
+  if (P.y <= 0) { P.y = 0; P.vy = 0; P.onGround = true; }
+  const hit = collideBuildings(W, P.x, P.z, CFG.playerRadius);
+  if (hit) { P.x += hit.x; P.z += hit.z; }
+  // Dermaga: koridor pejalan kaki ke ujung pier (x sampai -352, z ~60).
+  const minX = Math.abs(P.z - 60) < 6 ? -352 : -308;
+  P.x = clamp(P.x, minX, 308); P.z = clamp(P.z, -308, 308);
+  // Animasi jalan prosedural.
+  P.phase += dt * P.speed * 2.2;
+  const swing = Math.sin(P.phase) * (P.speed > 0.5 ? 0.6 : 0);
+  const parts = P.group.userData.parts;
+  parts.legL.rotation.x = swing; parts.legR.rotation.x = -swing;
+  parts.armL.rotation.x = -swing * 0.8; parts.armR.rotation.x = swing * 0.8;
+  P.group.position.set(P.x, P.y, P.z);
+  P.group.rotation.y = P.heading;
+  if (P.gun) P.gun.visible = W.combat.weapon > 0 && !P.car;
+  // Prompt konteks: mobil di dekat?
+  let nearCar = null, bd = 4.5;
+  for (const car of W.cars.list) {
+    if (car.driver === 'police' || car.driver === 'courier' || car.driver === 'rival') continue;
+    const d = Math.hypot(car.x - P.x, car.z - P.z);
+    if (d < bd) { bd = d; nearCar = car; }
+  }
+  if (nearCar) W.hud.setPrompt(`E — ${nearCar.driver === 'traffic' ? 'Curi' : 'Naik'} ${nearCar.spec.name}`);
+  else if (W.missions.nearInteract) W.hud.setPrompt(W.missions.nearInteract);
+  else W.hud.setPrompt('');
+  if (input.action('enter')) {
+    if (!tryEnterCar(W) && W.missions.onInteract) W.missions.onInteract(W);
+  }
+  updateCamera(W, dt);
+}
+export function updateCamera(W, dt) {
+  const P = W.player;
+  const cam = W.camera;
+  const cx = P.car ? P.car.x : P.x;
+  const cz = P.car ? P.car.z : P.z;
+  const cy = P.car ? 1.2 : P.y + 1.7;
+  // Kamera mengikuti heading mobil saat nyetir, bebas saat jalan kaki.
+  const yaw = P.car ? P.car.heading : P.camYaw;
+  const dist = P.camDist;
+  const pitch = P.camPitch;
+  const ox = Math.sin(yaw) * Math.cos(pitch) * dist;
+  const oz = Math.cos(yaw) * Math.cos(pitch) * dist;
+  const oy = Math.sin(pitch) * dist + 1.2;
+  const tx = cx - ox, tz = cz - oz, ty = cy + oy;
+  const k = Math.min(1, dt * 9);
+  cam.position.x += (tx - cam.position.x) * k;
+  cam.position.y += (ty - cam.position.y) * k;
+  cam.position.z += (tz - cam.position.z) * k;
+  cam.lookAt(cx, cy + 0.6, cz);
 }
