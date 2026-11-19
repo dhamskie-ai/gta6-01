@@ -17,6 +17,21 @@ export function createPlayerMesh(G) {
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.22), pants);
   legL.position.set(-0.15, 0.38, 0); g.add(legL);
   const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
+  // Shoes, a belt, a jacket collar, a ponytail and a shoulder strap —
+  // small boxes, but Ro stops reading as a plain mannequin up close.
+  const shoeMat = new THREE.MeshLambertMaterial({ color: 0x1a1210 });
+  for (const sx of [-0.15, 0.15]) {
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.32), shoeMat);
+    shoe.position.set(sx, 0.05, 0.04); g.add(shoe);
+  }
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.08, 0.34), shoeMat);
+  belt.position.y = 0.74; g.add(belt);
+  const collar = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.36), new THREE.MeshLambertMaterial({ color: 0x1e4a5e }));
+  collar.position.y = 1.54; g.add(collar);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.14), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
+  tail.position.set(0, 1.62, -0.24); g.add(tail);
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.85, 0.03), shoeMat);
+  strap.position.set(0.05, 1.15, 0.18); strap.rotation.z = 0.45; g.add(strap);
   const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.17), jacket);
   armL.position.set(-0.37, 1.1, 0); g.add(armL);
   const armR = armL.clone(); armR.position.x = 0.37; g.add(armR);
@@ -68,6 +83,10 @@ export function updatePlayerOnFoot(G, dt) {
   parts.armL.rotation.x = -swing * 0.7; parts.armR.rotation.x = swing * 0.7;
   parts.gun.visible = p.weapon === 1;
   G.playerMesh.position.copy(p.pos);
+  // A little bounce in the step and a forward lean at a run, so the
+  // walk cycle reads in the third-person camera instead of gliding.
+  if (moving) G.playerMesh.position.y = p.pos.y + Math.abs(Math.sin(p.walkPhase)) * 0.05;
+  G.playerMesh.rotation.x = moving && run ? 0.08 : 0;
   G.playerMesh.rotation.y = p.yaw;
   G.audio.setEngine(0, false);
 }

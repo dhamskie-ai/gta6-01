@@ -56,10 +56,10 @@ export function updateWheelInstances(G) {
   if (hubMesh) hubMesh.instanceMatrix.needsUpdate = true;
 }
 
-export function makeCarModel(type) {
+export function makeCarModel(type, paint) {
   const spec = CAR_MODELS[type];
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: spec.color });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: paint !== undefined ? paint : spec.color });
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x1a2028 });
   const body = new THREE.Mesh(new THREE.BoxGeometry(spec.wid, 0.75, spec.len), bodyMat);
   body.position.y = 0.62; body.castShadow = true; g.add(body);
@@ -71,12 +71,23 @@ export function makeCarModel(type) {
   const roof = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.9, 0.1, spec.len * (type === 'truck' ? 0.28 : 0.52)), bodyMat);
   roof.position.set(0, 1.2 + cabinH - 0.3 + 0.05, type === 'truck' ? spec.len * 0.28 : -spec.len * 0.05);
   roof.castShadow = true; g.add(roof);
-  // Slanted glass windshield at the front of the cabin.
+  // Slanted glass windshield at the front of the cabin, and a matching
+  // slanted rear window so the cabin reads as glass all round.
   const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fd8e8 });
   const shield = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.8, 0.06, 0.85), glassMat);
   shield.position.set(0, 1.35, spec.len * 0.2);
   shield.rotation.x = 0.5;
   g.add(shield);
+  const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.8, 0.06, 0.7), glassMat);
+  rearGlass.position.set(0, 1.35, -spec.len * 0.28);
+  rearGlass.rotation.x = -0.5;
+  g.add(rearGlass);
+  // Dark grille between the headlights, with a pale plate on the bumper.
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(spec.wid * 0.42, 0.2, 0.06), darkMat);
+  grille.position.set(0, 0.62, spec.len / 2 + 0.03); g.add(grille);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.16, 0.04),
+    new THREE.MeshBasicMaterial({ color: 0xf2f2e8 }));
+  plate.position.set(0, 0.42, spec.len / 2 + 0.15); g.add(plate);
   // Side mirrors on both front doors.
   for (const sx of [-1, 1]) {
     const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.22), darkMat);
@@ -134,8 +145,8 @@ export function detachBeams(car) {
   car.beams = [];
 }
 
-export function spawnCar(G, type, x, z, yaw, driver) {
-  const { group } = makeCarModel(type);
+export function spawnCar(G, type, x, z, yaw, driver, paint) {
+  const { group } = makeCarModel(type, paint);
   group.position.set(x, 0, z); group.rotation.y = yaw;
   G.scene.add(group);
   const car = { type, spec: CAR_MODELS[type], group, beams: [], x, z, yaw, speed: 0, steer: 0, health: 100, driver, smoke: null, wheelSpin: 0 };

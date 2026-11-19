@@ -8,19 +8,35 @@ import { CONFIG, districtAt } from './config.js';
 const STREETS = [];
 for (let c = CONFIG.streetMin; c <= CONFIG.streetMax; c += CONFIG.streetStep) STREETS.push(c);
 
-// Three facade variants: different base tones and lit-window ratios, so
-// no two blocks read the same. Dark windows are a warm slate, never black.
-function windowTexture(base, litRatio, litColor) {
-  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
+// Six facade variants at 256x512: different base tones and lit-window
+// ratios, so no two blocks read the same. Each variant ships two
+// canvases — the daytime face and a glow mask where only the lit
+// windows are painted, so the same windows light up after dark via
+// emissiveMap. Dark windows are a warm slate, never black.
+function facadeTextures(base, litRatio, litColor) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 512;
   const g = cv.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, 128, 256);
-  for (let y = 12; y < 244; y += 22) for (let x = 10; x < 118; x += 22) {
-    g.fillStyle = Math.random() < litRatio ? litColor : '#4a5a75';
-    g.fillRect(x, y, 14, 14);
+  g.fillStyle = base; g.fillRect(0, 0, 256, 512);
+  const glow = document.createElement('canvas'); glow.width = 256; glow.height = 512;
+  const gg = glow.getContext('2d');
+  gg.fillStyle = '#000000'; gg.fillRect(0, 0, 256, 512);
+  // A faint vertical shade so the face is not one flat slab of colour.
+  const shade = g.createLinearGradient(0, 0, 256, 0);
+  shade.addColorStop(0, 'rgba(0,0,0,0.10)');
+  shade.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.10)');
+  g.fillStyle = shade; g.fillRect(0, 0, 256, 512);
+  for (let y = 20; y < 486; y += 44) for (let x = 18; x < 232; x += 44) {
+    const lit = Math.random() < litRatio;
+    g.fillStyle = lit ? litColor : '#4a5a75';
+    g.fillRect(x, y, 26, 26);
+    if (lit) { gg.fillStyle = litColor; gg.fillRect(x, y, 26, 26); }
   }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  const map = new THREE.CanvasTexture(cv);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const glowTex = new THREE.CanvasTexture(glow);
+  glowTex.colorSpace = THREE.SRGBColorSpace;
+  return { map, glow: glowTex };
 }
 
 function textTexture(text, fg, bg) {
@@ -73,6 +89,50 @@ function groundTexture(maxAniso) {
     g.fillStyle = '#d8c25a';
     g.fillRect(X(-300), Z(s) - 1, 600 * SX, 2);
     g.fillRect(X(s) - 1, Z(-300), 2, 600 * SZ);
+    // Broken white lane dashes, one per lane, plus solid edge lines so
+    // each road reads as two lanes with a shoulder.
+    g.fillStyle = '#e8e8e8';
+    for (let d = -285; d < 285; d += 12) {
+      g.fillRect(X(d), Z(s + 2.5) - 0.7, 6 * SX, 1.4);
+      g.fillRect(X(d), Z(s - 2.5) - 0.7, 6 * SX, 1.4);
+      g.fillRect(X(s + 2.5) - 0.7, Z(d), 1.4, 6 * SZ);
+      g.fillRect(X(s - 2.5) - 0.7, Z(d), 1.4, 6 * SZ);
+    }
+    g.fillStyle = 'rgba(232,232,232,0.55)';
+    g.fillRect(X(-300), Z(s + 4.6) - 0.7, 600 * SX, 1.4);
+    g.fillRect(X(-300), Z(s - 4.6) - 0.7, 600 * SX, 1.4);
+    g.fillRect(X(s + 4.6) - 0.7, Z(-300), 1.4, 600 * SZ);
+    g.fillRect(X(s - 4.6) - 0.7, Z(-300), 1.4, 600 * SZ);
+  }
+  // Manhole covers: dark discs sitting in one lane, every ~90 m.
+  g.fillStyle = '#2c2f36';
+  for (const s of STREETS) for (let d = -240; d <= 240; d += 90) {
+    g.beginPath(); g.arc(X(d + 33), Z(s - 2.5), 1.1 * SX, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(X(s - 2.5), Z(d - 21), 1.1 * SX, 0, Math.PI * 2); g.fill();
+  }
+  // Asphalt wear: faint cracks, oil stains and speckle so the road
+  // surface is not one flat grey slab up close.
+  g.strokeStyle = 'rgba(20,20,24,0.35)';
+  for (let i = 0; i < 46; i++) {
+    const s = STREETS[Math.floor(Math.random() * STREETS.length)];
+    let cx = X(-280 + Math.random() * 560), cy = Z(s - 4 + Math.random() * 8);
+    if (Math.random() < 0.5) { cx = X(s - 4 + Math.random() * 8); cy = Z(-280 + Math.random() * 560); }
+    g.beginPath(); g.moveTo(cx, cy);
+    for (let k = 0; k < 4; k++) { cx += (Math.random() - 0.5) * 26; cy += (Math.random() - 0.5) * 26; g.lineTo(cx, cy); }
+    g.stroke();
+  }
+  for (let i = 0; i < 26; i++) {
+    const s = STREETS[Math.floor(Math.random() * STREETS.length)];
+    const sx = -280 + Math.random() * 560;
+    g.fillStyle = 'rgba(15,15,18,0.16)';
+    g.beginPath();
+    g.ellipse(X(sx), Z(s - 3 + Math.random() * 6), 8 + Math.random() * 14, 5 + Math.random() * 8, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  for (let i = 0; i < 2600; i++) {
+    const s = STREETS[Math.floor(Math.random() * STREETS.length)];
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.07)';
+    g.fillRect(X(-300 + Math.random() * 600), Z(s - 5 + Math.random() * 10), 2, 2);
   }
   // Zebra crossings at every intersection, both directions.
   g.fillStyle = '#e8e8e8';
@@ -193,10 +253,13 @@ export function buildCity(G) {
   const { scene, rng } = G;
   const city = { buildings: [], lamps: [], lampHeads: [], neonMats: [], neonHalos: [], ferris: null, coins: [], colliders: [], trafficLights: [], birds: [] };
   G.city = city;
-  const winTexs = [
-    windowTexture('#cfcfcf', 0.62, '#ffd98a'),
-    windowTexture('#b8c4d0', 0.5, '#ffb36a'),
-    windowTexture('#d8cbb0', 0.72, '#ff9a5a'),
+  const facadeTexs = [
+    facadeTextures('#cfcfcf', 0.62, '#ffd98a'),
+    facadeTextures('#b8c4d0', 0.5, '#ffb36a'),
+    facadeTextures('#d8cbb0', 0.72, '#ff9a5a'),
+    facadeTextures('#e0d8c8', 0.45, '#ffe9b0'),
+    facadeTextures('#9aa8b8', 0.58, '#ffc27a'),
+    facadeTextures('#c8b8a0', 0.66, '#ffab5e'),
   ];
 
   // Ground (one textured plane) + sea.
@@ -210,8 +273,14 @@ export function buildCity(G) {
   sea.rotation.x = -Math.PI / 2; sea.position.set(-410, 0.1, 0); scene.add(sea);
 
   // Buildings: collect transforms per facade material, then instance them.
-  const facadeCols = [0x8a7f72, 0x7d8aa0, 0xa08a6a, 0x6a7d8a, 0x9a6a6a, 0x707a68];
-  const mats = facadeCols.map((c, i) => new THREE.MeshLambertMaterial({ color: c, map: winTexs[i % 3] }));
+  // Facade tints are kept on the light side: the tint multiplies the
+  // window texture, and the darkest tints used to turn shaded faces
+  // near-black at midday.
+  const facadeCols = [0x8a7f72, 0x7d8aa0, 0xa08a6a, 0x87a0b2, 0x9a6a6a, 0x9aa39b];
+  const mats = facadeCols.map((c, i) => new THREE.MeshLambertMaterial({
+    color: c, map: facadeTexs[i].map,
+    emissiveMap: facadeTexs[i].glow, emissive: 0xffffff, emissiveIntensity: 0.12,
+  }));
   const perMat = mats.map(() => []);
   const roofs = [];
   for (let bx = -210; bx <= 210; bx += 60) for (let bz = -210; bz <= 210; bz += 60) {
@@ -246,6 +315,39 @@ export function buildCity(G) {
   const roofMesh = new THREE.InstancedMesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x3a3f47 }), roofs.length);
   roofs.forEach((r, i) => setInstance(roofMesh, i, r.x, r.h + 1, r.z, 0, r.w, 2, r.d));
   scene.add(roofMesh);
+
+  // Rooftop clutter: AC boxes on many roofs, water towers on the tall
+  // ones, thin antennas here and there — three instanced meshes, so the
+  // skyline stops being flat slabs at street level.
+  const acSpots = [], towerSpots = [], antennaSpots = [];
+  for (const r of roofs) {
+    if (rng.chance(0.55)) acSpots.push([r.x + rng.range(-r.w / 2, r.w / 2), r.h + 2.45, r.z + rng.range(-r.d / 2, r.d / 2)]);
+    if (r.h > 30 && rng.chance(0.5)) towerSpots.push([r.x, r.h + 2, r.z]);
+    if (rng.chance(0.22)) antennaSpots.push([r.x + rng.range(-r.w / 2, r.w / 2), r.h + 2, r.z + rng.range(-r.d / 2, r.d / 2)]);
+  }
+  if (acSpots.length) {
+    const acMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1.6, 0.9, 1.6),
+      new THREE.MeshLambertMaterial({ color: 0x8a8f96 }), acSpots.length);
+    acSpots.forEach(([px, py, pz], i) => setInstance(acMesh, i, px, py, pz, 0, 1, 1, 1));
+    scene.add(acMesh);
+  }
+  if (towerSpots.length) {
+    const tankMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.3, 1.3, 2.2, 10),
+      new THREE.MeshLambertMaterial({ color: 0x7a5a3a }), towerSpots.length);
+    const capMesh = new THREE.InstancedMesh(new THREE.ConeGeometry(1.5, 1.1, 10),
+      new THREE.MeshLambertMaterial({ color: 0x5a4230 }), towerSpots.length);
+    towerSpots.forEach(([px, py, pz], i) => {
+      setInstance(tankMesh, i, px, py + 1.1, pz, 0, 1, 1, 1);
+      setInstance(capMesh, i, px, py + 2.75, pz, 0, 1, 1, 1);
+    });
+    scene.add(tankMesh); scene.add(capMesh);
+  }
+  if (antennaSpots.length) {
+    const antMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.06, 0.1, 5, 5),
+      new THREE.MeshLambertMaterial({ color: 0x3a3f47 }), antennaSpots.length);
+    antennaSpots.forEach(([px, py, pz], i) => setInstance(antMesh, i, px, py + 2.5, pz, 0, 1, 1, 1));
+    scene.add(antMesh);
+  }
 
   // Palm trees: one merged geometry per palm, drawn as a single
   // InstancedMesh. Coast + plaza rows, plus avenue rows flanking the
@@ -319,6 +421,7 @@ export function buildCity(G) {
     ['PIZZA', '#ff8a3d', '#1c0e06'], ['24H MART', '#c98aff', '#120a1c'],
   ];
   let shopCount = 0;
+  const awningSpots = [];
   for (const b of city.buildings) {
     if (shopCount >= 22) break;
     if (!rng.chance(0.35)) continue;
@@ -331,7 +434,23 @@ export function buildCity(G) {
     sign.position.set(b.x, 2.6, b.z + (south ? b.hd + 0.15 : -b.hd - 0.15));
     sign.rotation.y = south ? 0 : Math.PI;
     scene.add(sign);
+    // A striped-colour awning slab above the sign, jutting out over
+    // the sidewalk, so the storefront reads as a shop, not a poster.
+    awningSpots.push({
+      x: b.x, z: b.z + (south ? b.hd + 0.7 : -b.hd - 0.7),
+      ry: south ? 0 : Math.PI, color: bg,
+    });
     shopCount++;
+  }
+  if (awningSpots.length) {
+    const awnMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(8.6, 0.18, 1.5),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }), awningSpots.length);
+    awningSpots.forEach((a, i) => {
+      setInstance(awnMesh, i, a.x, 3.9, a.z, a.ry, 1, 1, 1);
+      awnMesh.setColorAt(i, new THREE.Color(a.color));
+    });
+    if (awnMesh.instanceColor) awnMesh.instanceColor.needsUpdate = true;
+    scene.add(awnMesh);
   }
 
   // Traffic lights at four intersections: pole + arm + head, cycling
@@ -355,9 +474,10 @@ export function buildCity(G) {
     city.trafficLights.push({ red, amber, green, offset: li * 2.3 });
   }
 
-  // Six birds circling high over the city, wings flapping.
+  // Eight birds circling high over the city, wings flapping, in mixed
+  // sizes so the flock does not look cloned.
   const wingMat = new THREE.MeshBasicMaterial({ color: 0x222222, side: THREE.DoubleSide });
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     const bird = new THREE.Group();
     const wingGeo = new THREE.PlaneGeometry(1.3, 0.4);
     const wingL = new THREE.Mesh(wingGeo, wingMat);
@@ -365,6 +485,7 @@ export function buildCity(G) {
     const wingR = new THREE.Mesh(wingGeo, wingMat);
     wingR.position.x = 0.65;
     bird.add(wingL); bird.add(wingR);
+    bird.scale.setScalar(rng.range(0.8, 1.5));
     scene.add(bird);
     city.birds.push({
       group: bird, wingL, wingR,
@@ -373,6 +494,46 @@ export function buildCity(G) {
       speed: rng.range(0.05, 0.12), phase: rng.range(0, Math.PI * 2),
     });
   }
+
+  // Street furniture along the sidewalks: hydrants, benches, bins and
+  // planters. Each type is one (or two) instanced meshes, so the whole
+  // set costs a handful of draw calls.
+  const hydrantSpots = [], binSpots = [], planterSpots = [], benchSpots = [];
+  for (const s of STREETS) {
+    for (let t = -240; t <= 240; t += 45) {
+      const side = rng.chance(0.5) ? 7.4 : -7.4;
+      const roll = rng.next();
+      if (roll < 0.10) hydrantSpots.push([t, s + side, 0]);
+      else if (roll < 0.16) binSpots.push([t, s + side, 0]);
+      else if (roll < 0.20) planterSpots.push([t, s + side, 0]);
+      const side2 = rng.chance(0.5) ? 7.4 : -7.4;
+      const roll2 = rng.next();
+      if (roll2 < 0.08) hydrantSpots.push([s + side2, t, 1]);
+      else if (roll2 < 0.14) binSpots.push([s + side2, t, 1]);
+      else if (roll2 < 0.17) planterSpots.push([s + side2, t, 1]);
+    }
+  }
+  for (let i = 0; i < 10; i++) benchSpots.push([-250 + rng.range(-4, 4), -198 + i * 44, Math.PI / 2]);
+  for (let i = 0; i < 6; i++) benchSpots.push([-18 + i * 7, 138, Math.PI]);
+  const propMesh = (geo, color, spots, y, sy = 1) => {
+    if (!spots.length) return;
+    const m = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color }), spots.length);
+    spots.forEach(([px, pz, ry], i) => setInstance(m, i, px, y, pz, ry, 1, sy, 1));
+    m.castShadow = true;
+    scene.add(m);
+  };
+  propMesh(new THREE.CylinderGeometry(0.22, 0.28, 0.9, 8), 0xc23b2e, hydrantSpots, 0.45);
+  propMesh(new THREE.SphereGeometry(0.24, 8, 6), 0xc23b2e, hydrantSpots, 0.95);
+  propMesh(new THREE.CylinderGeometry(0.34, 0.28, 0.9, 8), 0x2a4a3a, binSpots, 0.45);
+  propMesh(new THREE.BoxGeometry(1.3, 0.7, 1.3), 0xa8623a, planterSpots, 0.35);
+  propMesh(new THREE.SphereGeometry(0.75, 8, 6), 0x3aa860, planterSpots, 1.0, 0.7);
+  propMesh(new THREE.BoxGeometry(2.0, 0.14, 0.6), 0x9a7a4a, benchSpots, 0.5);
+  // The backrest sits a quarter-metre behind the seat, on the side away
+  // from the road the bench faces.
+  const benchBackSpots = benchSpots.map(([px, pz, ry]) => [
+    px - Math.sin(ry) * 0.26, pz - Math.cos(ry) * 0.26, ry,
+  ]);
+  propMesh(new THREE.BoxGeometry(2.0, 0.55, 0.12), 0x9a7a4a, benchBackSpots, 0.85);
 
   // Marina pier + ferris wheel.
   const woodMat = new THREE.MeshLambertMaterial({ color: 0x9a7a4a });
@@ -455,6 +616,16 @@ export function buildCity(G) {
   city.coinMesh = coinMesh;
   scene.add(coinMesh);
   G.coins = city.coins;
+
+  // Wandering street bonus: a gold octahedron that pops up on a random
+  // road every so often; walking or driving through it pays $25.
+  const bonusMesh = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.9),
+    new THREE.MeshLambertMaterial({ color: 0xffd23f, emissive: 0xaa7a00, emissiveIntensity: 0.9 }),
+  );
+  bonusMesh.visible = false;
+  scene.add(bonusMesh);
+  G._bonus = { mesh: bonusMesh, x: 0, z: 0, active: false, timer: 8, spin: 0 };
   return city;
 }
 
@@ -495,6 +666,34 @@ export function updateCityFx(G, dt) {
     const flap = Math.sin(G.time * 6 + bird.phase) * 0.55;
     bird.wingL.rotation.z = 0.25 + flap;
     bird.wingR.rotation.z = -0.25 - flap;
+  }
+  // Street bonus: while it sits out, spin and bob it; the player
+  // collects it by passing through, and it hops to a new road after
+  // a breather. The countdown only runs during play.
+  const bonus = G._bonus;
+  if (bonus) {
+    if (bonus.active) {
+      bonus.spin += dt * 2.5;
+      bonus.mesh.rotation.y = bonus.spin;
+      bonus.mesh.position.y = 1.3 + Math.sin(G.time * 3) * 0.25;
+      if (G.phase === 'play' && Math.hypot(G.player.pos.x - bonus.x, G.player.pos.z - bonus.z) < 2.6) {
+        bonus.active = false;
+        bonus.mesh.visible = false;
+        bonus.timer = 40;
+        G.player.cash += 25;
+        G.hud.toast('Street bonus +$25');
+        G.audio.pickup();
+      }
+    } else if (G.phase === 'play') {
+      bonus.timer -= dt;
+      if (bonus.timer <= 0) {
+        const spot = randomRoadPos(G.rng);
+        bonus.x = spot.x; bonus.z = spot.z;
+        bonus.mesh.position.set(bonus.x, 1.3, bonus.z);
+        bonus.mesh.visible = true;
+        bonus.active = true;
+      }
+    }
   }
 }
 

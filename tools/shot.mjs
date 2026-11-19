@@ -67,13 +67,17 @@ for (const [scene, file] of SHOT_LIST) {
   });
   await page.goto(`http://solarabay.game/?shot=${scene}&seed=8`, { waitUntil: 'load', timeout: 60000 });
   try {
-    await page.waitForFunction(() => window.__shotReady, null, { timeout: 60000 });
+    // Supersampled frames are slow under SwiftShader (a chase frame
+    // can take ~15 s), so the ready wait gets a generous budget.
+    await page.waitForFunction(() => window.__shotReady, null, { timeout: 180000 });
   } catch {
     console.log(scene, 'shotReady timeout');
     failures += 1;
   }
   await page.waitForTimeout(400);
-  await page.screenshot({ path: `${SHOT_DIR}/${file}`, type: 'jpeg', quality: 85, timeout: 120000 });
+  // Round 6: quality 92 — the supersampled frames have the detail to
+  // justify it, and the files still sit well under the 256 KiB cap.
+  await page.screenshot({ path: `${SHOT_DIR}/${file}`, type: 'jpeg', quality: 92, timeout: 120000 });
   console.log(scene, '->', file);
   await page.close();
 }

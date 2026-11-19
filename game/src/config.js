@@ -39,6 +39,13 @@ export const CAR_MODELS = {
   truck:   { color: 0x2e7d5b, len: 6.2, wid: 2.3, name: 'Hauler',    top: 24, accel: 0.7,  grip: 0.85 },
 };
 
+// Extra paint jobs for traffic and parked cars, so the streets stop
+// looking like a six-car fleet. Taxis and trucks keep their work colours.
+export const PAINT_COLORS = [
+  0xc23b2e, 0x2e7dc2, 0x3fae5a, 0xd8a02a, 0x8a5fc2, 0xe8e8e8,
+  0x2c2f36, 0xd94f8a, 0x3fb5a8, 0xb56a2e, 0x6a8a3a, 0x9a3ad8,
+];
+
 export const DISTRICTS = [
   { name: 'Marina Bay',  test: (x, z) => x < -180, style: 'marina' },
   { name: 'The Docks',   test: (x, z) => x > 180, style: 'docks' },

@@ -2,7 +2,7 @@
 // Pedestrians share 6 InstancedMeshes (body/head/legs/arms) — 6 draw calls
 // for the whole crowd, with per-instance colours.
 import * as THREE from 'three';
-import { CONFIG, PED_NAMES } from './config.js';
+import { CONFIG, PED_NAMES, PAINT_COLORS } from './config.js';
 import { randomRoadPos } from './city.js';
 import { spawnCar } from './vehicles.js';
 
@@ -62,7 +62,9 @@ export function spawnPed(G, x, z) {
   for (const k of Object.keys(pedMeshes)) if (pedMeshes[k].instanceColor) pedMeshes[k].instanceColor.needsUpdate = true;
   const ped = {
     slot, x, z, yaw: rng.range(0, Math.PI * 2),
-    speed: rng.range(1.0, 1.8), state: 'walk', fleeT: 0, walkPhase: rng.range(0, 6),
+    // Most walk; a few jog. idleT counts down a pause at a shop window.
+    speed: rng.chance(0.12) ? rng.range(2.4, 3.0) : rng.range(1.0, 1.8),
+    state: 'walk', fleeT: 0, idleT: 0, walkPhase: rng.range(0, 6),
     name: rng.pick(PED_NAMES), taxi: false,
   };
   G.peds.push(ped);
@@ -84,7 +86,10 @@ export function spawnTrafficWorld(G) {
     const p = randomRoadPos(rng);
     const type = rng.pick(TRAFFIC_TYPES);
     const yaw = p.axis === 'x' ? (p.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (p.dir > 0 ? 0 : Math.PI);
-    const car = spawnCar(G, type, p.x, p.z, yaw, 'traffic');
+    // Work vehicles keep their livery; everything else gets a random
+    // paint job from the palette so traffic stops looking cloned.
+    const paint = type === 'taxi' || type === 'truck' ? undefined : rng.pick(PAINT_COLORS);
+    const car = spawnCar(G, type, p.x, p.z, yaw, 'traffic', paint);
     car.speed = rng.range(6, 11);
     car.cruise = car.speed;
     car.axis = p.axis; car.dir = p.dir;
@@ -94,7 +99,8 @@ export function spawnTrafficWorld(G) {
     const p = randomRoadPos(rng);
     const type = rng.pick(['sedan', 'hatch', 'van', 'taxi']);
     const yaw = p.axis === 'x' ? (p.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (p.dir > 0 ? 0 : Math.PI);
-    spawnCar(G, type, p.x + (p.axis === 'x' ? 0 : 3.4), p.z + (p.axis === 'x' ? 3.4 : 0), yaw, 'parked');
+    const paint = type === 'taxi' ? undefined : rng.pick(PAINT_COLORS);
+    spawnCar(G, type, p.x + (p.axis === 'x' ? 0 : 3.4), p.z + (p.axis === 'x' ? 3.4 : 0), yaw, 'parked', paint);
   }
   G.trafficPeds = [];
   G.peds = [];
@@ -173,16 +179,25 @@ export function updatePeds(G, dt) {
     } else if (ped.state === 'police' || ped.state === 'guard') {
       // Moved by police.js / combat.js; only animate here.
     } else {
-      ped.x += Math.sin(ped.yaw) * ped.speed * dt;
-      ped.z += Math.cos(ped.yaw) * ped.speed * dt;
-      if (G.rng.chance(dt * 0.08)) ped.yaw += (G.rng.chance(0.5) ? 1 : -1) * Math.PI / 2;
-      if (Math.abs(ped.x) > 250 || Math.abs(ped.z) > 250) ped.yaw += Math.PI;
+      // Walkers sometimes stop for a few seconds — window-shopping,
+      // checking a phone, waiting to cross — then carry on.
+      if (ped.idleT > 0) {
+        ped.idleT -= dt;
+        if (G.rng.chance(dt * 0.4)) ped.yaw += G.rng.range(-0.5, 0.5);
+      } else {
+        ped.x += Math.sin(ped.yaw) * ped.speed * dt;
+        ped.z += Math.cos(ped.yaw) * ped.speed * dt;
+        if (G.rng.chance(dt * 0.08)) ped.yaw += (G.rng.chance(0.5) ? 1 : -1) * Math.PI / 2;
+        if (Math.abs(ped.x) > 250 || Math.abs(ped.z) > 250) ped.yaw += Math.PI;
+        if (G.rng.chance(dt * 0.06)) ped.idleT = G.rng.range(2, 5);
+      }
     }
     if (G.lastShotT !== undefined && G.time - G.lastShotT < 1.5) {
       const d = Math.hypot(ped.x - p.x, ped.z - p.z);
       if (d < 25 && ped.state !== 'flee' && ped.state !== 'police' && ped.state !== 'guard') { ped.state = 'flee'; ped.fleeT = 5; }
     }
-    const moving = ped.state === 'flee' || ped.state === 'walk' || ped.state === 'police' || ped.state === 'guard';
+    const strolling = ped.state === 'walk' && ped.idleT <= 0;
+    const moving = ped.state === 'flee' || strolling || ped.state === 'police' || ped.state === 'guard';
     ped.walkPhase += dt * (ped.state === 'flee' ? 11 : moving ? 8 : 0);
     const swing = moving ? Math.sin(ped.walkPhase) * 0.5 : 0;
     const s = ped.slot;

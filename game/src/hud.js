@@ -35,6 +35,7 @@ export function createHud(G) {
     policeList: $('police-list'), radioTrack: $('radio-track'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
     title: $('title'), pause: $('pause'), gameover: $('gameover'),
+    fpsEl: $('fps'),
     toastT: 0, dialogT: 0, bannerT: 0, policeT: 1, // build the list on frame 1
     showPrompt(text) {
       hud.prompt.style.display = text ? 'block' : 'none';
@@ -73,6 +74,20 @@ export function createHud(G) {
   $('btn-quit').addEventListener('click', () => { G.saveGame(); G.quitToTitle(); });
   $('btn-retry').addEventListener('click', () => { G.retryMission(); });
   $('btn-title').addEventListener('click', () => G.quitToTitle());
+  // Pause-menu quality controls: level select, 4K toggle, FPS toggle.
+  // Changes go through G.applyQuality so they take effect at once.
+  const qSel = $('quality'), q4k = $('quality-4k'), qFps = $('quality-fps');
+  const syncQualityInputs = () => {
+    const q = G.quality || { level: 'high', fourK: false, showFps: false };
+    if (qSel) qSel.value = q.level;
+    if (q4k) q4k.checked = !!q.fourK;
+    if (qFps) qFps.checked = !!q.showFps;
+  };
+  syncQualityInputs();
+  if (qSel) qSel.addEventListener('change', () => { G.quality.level = qSel.value; G.applyQuality(); });
+  if (q4k) q4k.addEventListener('change', () => { G.quality.fourK = q4k.checked; G.applyQuality(); });
+  if (qFps) qFps.addEventListener('change', () => { G.quality.showFps = qFps.checked; G.applyQuality(); });
+  hud.syncQualityInputs = syncQualityInputs;
   return hud;
 }
 
@@ -134,6 +149,12 @@ export function updateHud(G, dt) {
   } else hud.conditionWrap.style.display = 'none';
   // Radio: one invented track every 25 seconds.
   hud.radioTrack.textContent = TRACKS[Math.floor(G.time / 25) % TRACKS.length];
+  // FPS readout, only when the player asked for it (pause menu or F3).
+  if (hud.fpsEl) {
+    const showFps = G.quality && G.quality.showFps;
+    hud.fpsEl.style.display = showFps ? 'block' : 'none';
+    if (showFps) hud.fpsEl.textContent = `${Math.round(G._fps || 60)} FPS · PR ${G._prCur || 1}`;
+  }
   // Police response list, rebuilt at most twice a second.
   hud.policeT += dt;
   if (hud.policeT > 0.5) { hud.policeT = 0; rebuildPoliceList(G); }
@@ -155,11 +176,42 @@ function drawMinimap(G) {
   const toMap = (x, z) => [(x + HALF) / (HALF * 2) * S, (z + HALF) / (HALF * 2) * S];
   g.fillStyle = '#0e1a24'; g.fillRect(0, 0, S, S);
   g.fillStyle = '#1f6f9f'; g.fillRect(0, 0, 8, S); // sea strip
-  g.strokeStyle = '#4a5568'; g.lineWidth = 2;
+  // The two boulevards through downtown draw thicker than the side
+  // streets, so the map reads like a city instead of a chessboard.
   for (let c = -240; c <= 240; c += 60) {
     const [ax] = toMap(c, 0); const [, bz] = toMap(0, c);
+    const main = c === 0;
+    g.strokeStyle = main ? '#6a7a8c' : '#4a5568';
+    g.lineWidth = main ? 3.5 : 2;
     g.beginPath(); g.moveTo(ax, 0); g.lineTo(ax, S); g.stroke();
     g.beginPath(); g.moveTo(0, bz); g.lineTo(S, bz); g.stroke();
+  }
+  // District names, small and dim, plus the pier jutting into the sea.
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.font = 'bold 7px sans-serif'; g.textAlign = 'center';
+  const labels = [
+    ['MARINA BAY', -210, 0], ['THE DOCKS', 210, 0], ['VISTA HILLS', 0, -238],
+    ['THE SPIRES', 0, -6], ['OLD SOLARA', 0, 152], ['CALLE VERDE', -152, -152],
+  ];
+  for (const [name, lx, lz] of labels) {
+    const [mx, mz] = toMap(lx, lz);
+    g.fillText(name, mx, mz);
+  }
+  g.fillStyle = '#9a7a4a';
+  const [pierX, pierZ] = toMap(-322, 0);
+  g.fillRect(pierX - 6, pierZ - 4, 6, 8);
+  // Sun coins near the player, and the wandering street bonus, as gold dots.
+  const p0 = G.player.pos;
+  g.fillStyle = '#ffd23f';
+  for (const coin of G.coins) {
+    if (coin.taken) continue;
+    if (Math.hypot(coin.x - p0.x, coin.z - p0.z) > 160) continue;
+    const [mx, mz] = toMap(coin.x, coin.z);
+    g.fillRect(mx - 1, mz - 1, 2, 2);
+  }
+  if (G._bonus && G._bonus.active) {
+    const [bx, bz] = toMap(G._bonus.x, G._bonus.z);
+    g.beginPath(); g.arc(bx, bz, 3.5, 0, Math.PI * 2); g.fill();
   }
   // Garage + shops.
   g.fillStyle = '#3ddc5f';

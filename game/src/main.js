@@ -12,7 +12,7 @@ import { addWanted, updateWantedLevel, updatePolice } from './police.js';
 import { createCombat, updateCombat } from './combat.js';
 import { createMissions, startMission, updateMissions } from './missions.js';
 import { createHud, updateHud, showTitle, showPause, showGameOver, saveGameData, loadGameData, missionName } from './hud.js';
-import { createRender, updateDayNight, createEffects } from './render.js';
+import { createRender, updateDayNight, createEffects, loadQuality, saveQuality, applyQuality, updateDynamicRes } from './render.js';
 import { setupShot } from './shots.js';
 
 const query = new URLSearchParams(location.search);
@@ -63,7 +63,15 @@ G.addWanted = (n, reason) => addWanted(G, n, reason);
 G.input = createInput(document.getElementById('scene'));
 G.audio = createAudio();
 
-createRender(G, { lowFx: !!shot });
+G.quality = loadQuality();
+createRender(G, { shotMode: !!shot, quality: G.quality });
+// Pause-menu changes land here: persist the preset, apply it to the
+// renderer, and keep the menu controls in sync with the stored values.
+G.applyQuality = () => {
+  saveQuality(G.quality);
+  applyQuality(G);
+  if (G.hud && G.hud.syncQualityInputs) G.hud.syncQualityInputs();
+};
 createEffects(G);
 buildCity(G);
 initWheelInstances(G);
@@ -205,6 +213,11 @@ function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, frameClock.getDelta());
   G.time += dt;
+  // Smoothed frame rate: feeds the FPS readout and the dynamic
+  // resolution scaler. The loop is delta-time based throughout, so no
+  // gameplay logic depends on the frame rate itself.
+  const instFps = dt > 0.001 ? 1 / dt : 60;
+  G._fps = G._fps ? G._fps * 0.95 + instFps * 0.05 : instFps;
   const keys = G.input;
 
   if (G.phase === 'play') {
@@ -219,6 +232,11 @@ function frame() {
     if (keys.wasPressed('KeyF')) {
       G.lightsOn = !G.lightsOn;
       G.hud.toast(G.lightsOn ? 'Headlights on' : 'Headlights off');
+    }
+    if (keys.wasPressed('F3')) {
+      G.quality.showFps = !G.quality.showFps;
+      saveQuality(G.quality);
+      G.hud.toast(G.quality.showFps ? 'FPS counter on' : 'FPS counter off');
     }
 
     if (G.playerCar) updatePlayerCar(G, dt);
@@ -262,6 +280,7 @@ function frame() {
 
   updateDayNight(G, dt);
   G.effects.update(dt);
+  updateDynamicRes(G, dt);
   G.renderer.render(G.scene, G.camera);
 
   // A shot counts as ready after a few settled frames.

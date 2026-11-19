@@ -1,6 +1,8 @@
 // Renderer: scene, lights, warm sunset sky, sun glow, drifting clouds,
-// fog, particles, explosions. Crisp output: pixel ratio capped at 2 and
-// ACES filmic tone mapping so the golden hour reads warm, not washed out.
+// fog, particles, explosions. Sharpness: screenshots render supersampled
+// (pixel ratio 3, ~4K backing store) with antialiasing on, while live
+// play uses a quality setting (Low/Medium/High/Ultra + 4K toggle) with
+// dynamic resolution scaling that sheds pixels when the frame rate sags.
 import * as THREE from 'three';
 
 // Soft radial disc, drawn once on a canvas and reused for the sun glow,
@@ -16,15 +18,96 @@ function glowTexture(inner, outer) {
   return tex;
 }
 
+const QUALITY_KEY = 'solarabay-quality-v1';
+const QUALITY_LEVELS = {
+  low: { pr: 1, shadows: false, shadowSize: 1024 },
+  medium: { pr: 1.5, shadows: true, shadowSize: 1024 },
+  high: { pr: 2, shadows: true, shadowSize: 1024 },
+  ultra: { pr: 2, shadows: true, shadowSize: 2048 },
+};
+
+// Quality preference kept in localStorage; bad or missing data falls
+// back to High with the 4K toggle off and dynamic scaling on.
+export function loadQuality() {
+  const fallback = { level: 'high', fourK: false, showFps: false, drs: true };
+  try {
+    const raw = localStorage.getItem(QUALITY_KEY);
+    if (!raw) return fallback;
+    const q = JSON.parse(raw);
+    if (!QUALITY_LEVELS[q.level]) q.level = 'high';
+    return { ...fallback, ...q };
+  } catch { return fallback; }
+}
+export function saveQuality(q) {
+  try { localStorage.setItem(QUALITY_KEY, JSON.stringify(q)); } catch { /* private mode */ }
+}
+
+// Highest pixel ratio the current settings allow. The 4K toggle lifts
+// the cap to 3x, which on a 1280-wide view is a 3840-wide backing store.
+export function qualityCap(q) {
+  if (q.fourK) return 3;
+  return QUALITY_LEVELS[q.level || 'high'].pr;
+}
+
+// Apply a quality preset to the live renderer: pixel-ratio cap and
+// whether the sun casts shadows at all.
+export function applyQuality(G) {
+  const q = G.quality || loadQuality();
+  const level = QUALITY_LEVELS[q.level || 'high'];
+  G._prCap = qualityCap(q);
+  G._prCur = Math.min(devicePixelRatio || 1, G._prCap);
+  G.renderer.setPixelRatio(G._prCur);
+  G.renderer.shadowMap.enabled = level.shadows;
+  if (G.lights && G.lights.sun) G.lights.sun.shadow.mapSize.set(level.shadowSize, level.shadowSize);
+  if (G.lights && G.lights.sun && G.lights.sun.shadow.map) {
+    G.lights.sun.shadow.map.dispose();
+    G.lights.sun.shadow.map = null;
+  }
+}
+
+// Dynamic resolution scaling: when the frame rate stays low, step the
+// pixel ratio down a notch; when it recovers, step back up toward the
+// cap. Never runs in shot mode, where the ratio is fixed for the capture.
+export function updateDynamicRes(G, dt) {
+  if (G._shotMode || !G.renderer || !G.quality || G.quality.drs === false) return;
+  if (G._drsCooldown === undefined) G._drsCooldown = 0;
+  G._drsCooldown -= dt;
+  if (G._drsCooldown > 0) return;
+  const fps = G._fps || 60;
+  if (fps < 42 && G._prCur > 1) {
+    G._prCur = Math.max(1, G._prCur - 0.25);
+    G.renderer.setPixelRatio(G._prCur);
+    G._drsCooldown = 2;
+  } else if (fps > 57 && G._prCur < G._prCap) {
+    G._prCur = Math.min(G._prCap, G._prCur + 0.25);
+    G.renderer.setPixelRatio(G._prCur);
+    G._drsCooldown = 2;
+  }
+}
+
 export function createRender(G, opts = {}) {
-  const lowFx = !!opts.lowFx;
+  const shotMode = !!opts.shotMode;
   const canvas = document.getElementById('scene');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowFx });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  G.quality = opts.quality || loadQuality();
+  if (shotMode) {
+    // A capture only needs a handful of frames, so spend the pixels:
+    // 3x on a 1280x720 view is a 3840x2160 backing store, and the
+    // browser downsamples it into a much crisper JPEG.
+    G._shotMode = true;
+    G._prCap = 3;
+    G._prCur = 3;
+    renderer.setPixelRatio(3);
+  } else {
+    G._shotMode = false;
+    G._prCap = qualityCap(G.quality);
+    G._prCur = Math.min(devicePixelRatio || 1, G._prCap);
+    renderer.setPixelRatio(G._prCur);
+  }
   renderer.setSize(innerWidth, innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
-  renderer.shadowMap.enabled = !lowFx;
+  renderer.shadowMap.enabled = shotMode || QUALITY_LEVELS[G.quality.level || 'high'].shadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   addEventListener('resize', () => {
     renderer.setSize(innerWidth, innerHeight);
@@ -33,7 +116,9 @@ export function createRender(G, opts = {}) {
   });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87b5d6);
-  scene.fog = new THREE.Fog(0x9ab8cc, 180, 520);
+  // Fog sits far out now: distant towers used to dissolve into haze
+  // while they were still clearly visible on the map.
+  scene.fog = new THREE.Fog(0x9ab8cc, 240, 820);
   const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 900);
   camera.position.set(0, 8, -14);
   const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
@@ -55,18 +140,21 @@ export function createRender(G, opts = {}) {
   }));
   sunGlow.scale.set(180, 180, 1);
   scene.add(sunGlow);
-  // Nine slow cloud puffs high above the city.
+  // Fourteen cloud puffs in mixed sizes: a few wide flat sheets, a few
+  // tall billows, each with its own base opacity so the sky stops
+  // looking stamped from one shape.
   const cloudTex = glowTexture('rgba(255, 255, 255, 0.85)', 'rgba(255, 255, 255, 0)');
   const clouds = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 14; i++) {
     const puff = new THREE.Sprite(new THREE.SpriteMaterial({
       map: cloudTex, transparent: true, opacity: 0.5, depthWrite: false,
     }));
-    const w = 90 + G.rng.range(0, 90);
-    puff.scale.set(w, w * 0.36, 1);
-    puff.position.set(G.rng.range(-420, 420), G.rng.range(110, 170), G.rng.range(-320, 320));
+    const w = 70 + G.rng.range(0, 150);
+    const tall = i % 4 === 0;
+    puff.scale.set(w, w * (tall ? 0.5 : 0.3), 1);
+    puff.position.set(G.rng.range(-420, 420), G.rng.range(105, 175), G.rng.range(-320, 320));
     scene.add(puff);
-    clouds.push({ sprite: puff, drift: G.rng.range(1.2, 3.2) });
+    clouds.push({ sprite: puff, drift: G.rng.range(1.0, 3.4), baseOp: G.rng.range(0.32, 0.62) });
   }
   G.renderer = renderer; G.scene = scene; G.camera = camera;
   G.lights = { sun, hemi, moon };
@@ -124,8 +212,8 @@ export function updateDayNight(G, dt) {
   G.lights.sun.intensity = isDay ? 2.2 : isNight ? 0 : 1.2 + set * 0.5;
   G.lights.sun.color.setHex(0xfff2d8).lerp(new THREE.Color(0xff8f3d), set);
   // Fill is deliberately strong: with ACES tone mapping, shadowed faces
-  // read near-black at the plan's 1.15, so day fill is 1.5 instead.
-  G.lights.hemi.intensity = isNight ? 0.35 : isDay ? 1.5 : 1.1;
+  // read near-black at the plan's 1.15, so day fill is 1.6 instead.
+  G.lights.hemi.intensity = isNight ? 0.35 : isDay ? 1.6 : 1.1;
   G.lights.moon.intensity = isNight ? 0.5 : 0;
   G.lights.moon.position.set(p.x - 100, 160, p.z - 80);
   G.lights.moon.target.position.set(p.x, 0, p.z);
@@ -136,13 +224,14 @@ export function updateDayNight(G, dt) {
     const s = 180 + set * 170;
     G._sunGlow.scale.set(s, s, 1);
   }
-  // Clouds drift and thin out after dark.
+  // Clouds drift and thin out after dark; each keeps its own base
+  // opacity so the sky keeps its variety at every hour.
   if (G._clouds) {
-    const cloudOp = isNight ? 0.16 : isDay ? 0.5 : 0.34;
+    const dim = isNight ? 0.32 : isDay ? 1 : 0.68;
     for (const c of G._clouds) {
       c.sprite.position.x += c.drift * dt;
       if (c.sprite.position.x > 460) c.sprite.position.x = -460;
-      c.sprite.material.opacity = cloudOp;
+      c.sprite.material.opacity = c.baseOp * dim;
     }
   }
   // Lamps + neon glow at night (only re-apply when the factor moves).

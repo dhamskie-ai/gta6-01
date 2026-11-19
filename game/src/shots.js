@@ -61,6 +61,8 @@ export function setupShot(G, name) {
     G.camDist = 7;
   } else if (name === 'street') {
     // Midday in the Old Solara market, on foot: crowds, an NPC, a prompt.
+    // The crowd stands NORTH of Ro, past the crossing, so the chase
+    // camera (which sits south of her and looks north) actually sees it.
     G.mission.index = 0; // First Gear, so the panel reads CH 1, STAGE 1/2.
     G.timeOfDay = 12.0;
     hero.pos.set(0, 0, 132);
@@ -69,12 +71,12 @@ export function setupShot(G, name) {
     G.playerMesh.position.copy(hero.pos);
     G.wanted = 0;
     for (let i = 0; i < 8; i++) {
-      spawnPed(G, G.rng.range(-14, 14), 150 + G.rng.range(-12, 12));
+      spawnPed(G, G.rng.range(-14, 14), 96 + G.rng.range(-10, 10));
     }
-    const npc = spawnPed(G, 3, 144);
+    const npc = spawnPed(G, 3, 102);
     npc.state = 'wait';
-    G.mission.marker = { x: 3, z: 144 };
-    G.mission.beacon.position.set(3, 0, 144);
+    G.mission.marker = { x: 3, z: 102 };
+    G.mission.beacon.position.set(3, 0, 102);
     G.hud.showObjective('First Gear — steal the parked car (press E near it)');
     G.hud.showPrompt('E — Talk to Mara');
     G.camYaw = 0;
