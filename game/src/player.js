@@ -1,116 +1,85 @@
-// Ro Mendez on foot + third-person chase camera.
+// Nico on foot: walk/run/jump, third-person camera, enter + steal cars.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { collideBuildings } from './city.js';
-export function createPlayerMesh(G) {
+import { clamp, angLerp } from './random.js';
+
+export function createPlayer(G) {
   const g = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6f8e });
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x2a9d8f });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2a33 });
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a077 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.32), jacket);
-  body.position.y = 1.1; body.castShadow = true; g.add(body);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.12, 0.34),
-    new THREE.MeshLambertMaterial({ color: 0xffd23f }));
-  stripe.position.y = 1.28; g.add(stripe);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), skin);
-  head.position.y = 1.7; head.castShadow = true; g.add(head);
-  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
-  hair.position.y = 1.9; g.add(hair);
-  const shades = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.1),
-    new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  shades.position.set(0, 1.86, 0.16); g.add(shades);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.22), pants);
-  legL.position.set(-0.15, 0.38, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
-  const shoeMat = new THREE.MeshLambertMaterial({ color: 0x1a1210 });
-  for (const sx of [-0.15, 0.15]) {
-    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.32), shoeMat);
-    shoe.position.set(sx, 0.05, 0.04); g.add(shoe);
-  }
-  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.08, 0.34), shoeMat);
-  belt.position.y = 0.74; g.add(belt);
-  const collar = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.36), new THREE.MeshLambertMaterial({ color: 0x1e4a5e }));
-  collar.position.y = 1.54; g.add(collar);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.34, 0.14), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
-  tail.position.set(0, 1.62, -0.24); g.add(tail);
-  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.85, 0.03), shoeMat);
-  strap.position.set(0.05, 1.15, 0.18); strap.rotation.z = 0.45; g.add(strap);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.17), jacket);
-  armL.position.set(-0.37, 1.1, 0); g.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.37; g.add(armR);
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.42), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  gun.position.set(0.37, 0.82, 0.22); gun.name = 'gun'; gun.visible = false; g.add(gun);
-  g.position.copy(G.player.pos);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.85, 0.36), jacket); body.position.y = 1.15; g.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.12, 0.38), new THREE.MeshLambertMaterial({ color: 0xffd24a })); stripe.position.y = 1.3; g.add(stripe);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), skin); head.position.y = 1.78; g.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.4), new THREE.MeshLambertMaterial({ color: 0x222222 })); cap.position.y = 1.98; g.add(cap);
+  const glasses = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.08, 0.05), new THREE.MeshLambertMaterial({ color: 0x111111 })); glasses.position.set(0, 1.8, 0.19); g.add(glasses);
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.08, 0.38), new THREE.MeshLambertMaterial({ color: 0x111111 })); belt.position.y = 0.74; g.add(belt);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.72, 0.24), pants); legL.position.set(-0.16, 0.36, 0); g.add(legL);
+  const legR = legL.clone(); legR.position.x = 0.16; g.add(legR);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.2), jacket); armL.position.set(-0.42, 1.15, 0); g.add(armL);
+  const armR = armL.clone(); armR.position.x = 0.42; g.add(armR);
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.05), new THREE.MeshLambertMaterial({ color: 0x5a3a1a })); strap.position.set(0.14, 1.2, 0.2); strap.rotation.z = 0.35; g.add(strap);
+  const shoeM = new THREE.MeshLambertMaterial({ color: 0xeeeeee });
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.4), shoeM); shoeL.position.set(-0.16, 0.05, 0.05); g.add(shoeL);
+  const shoeR = shoeL.clone(); shoeR.position.x = 0.16; g.add(shoeR);
   G.scene.add(g);
-  G.playerMesh = g;
-  G.playerParts = { legL, legR, armL, armR, gun };
-  return g;
-}
-export function updatePlayerOnFoot(G, dt) {
-  const p = G.player;
-  const input = G.input;
-  const { dx, dy } = input.consumeMouse();
-  G.camYaw -= dx * 0.0032;
-  G.camPitch = Math.max(-0.4, Math.min(0.7, G.camPitch + dy * 0.0022));
-  if (input.wheel) G.camDist = Math.max(4, Math.min(12, G.camDist + input.wheel * 0.01));
-  if (input.wasPressed('KeyC')) G.camDist = G.camDist > 7 ? 5 : 9;
-  const run = input.down('ShiftLeft') || input.down('ShiftRight');
-  const speed = run ? CONFIG.runSpeed : CONFIG.walkSpeed;
-  let mx = 0, mz = 0;
-  if (input.down('KeyW') || input.down('ArrowUp')) mz += 1;
-  if (input.down('KeyS') || input.down('ArrowDown')) mz -= 1;
-  if (input.down('KeyA') || input.down('ArrowLeft')) mx -= 1;
-  if (input.down('KeyD') || input.down('ArrowRight')) mx += 1;
-  const moving = mx !== 0 || mz !== 0;
-  if (moving) {
-    const len = Math.hypot(mx, mz); mx /= len; mz /= len;
-    const sy = Math.sin(G.camYaw), cy = Math.cos(G.camYaw);
-    const wx = (mx * cy + mz * sy) * speed * dt;
-    const wz = (-mx * sy + mz * cy) * speed * dt;
-    const res = collideBuildings(G, p.pos.x + wx, p.pos.z + wz, 0.6);
-    p.pos.x = res.x; p.pos.z = res.z;
-    p.yaw = Math.atan2(wx, wz);
-    p.walkPhase += dt * (run ? 13 : 9);
-  }
-  if (input.wasPressed('Space') && p.pos.y <= 0.01) p.vy = CONFIG.jumpSpeed;
-  p.vy -= CONFIG.gravity * dt;
-  p.pos.y += p.vy * dt;
-  if (p.pos.y < 0) { p.pos.y = 0; p.vy = 0; }
-  const parts = G.playerParts;
-  const swing = moving ? Math.sin(p.walkPhase) * 0.55 : 0;
-  parts.legL.rotation.x = swing; parts.legR.rotation.x = -swing;
-  parts.armL.rotation.x = -swing * 0.7; parts.armR.rotation.x = swing * 0.7;
-  parts.gun.visible = p.weapon === 1;
-  G.playerMesh.position.copy(p.pos);
-  if (moving) G.playerMesh.position.y = p.pos.y + Math.abs(Math.sin(p.walkPhase)) * 0.05;
-  G.playerMesh.rotation.x = moving && run ? 0.08 : 0;
-  G.playerMesh.rotation.y = p.yaw;
-  G.audio.setEngine(0, false);
-}
-export function updateCamera(G, dt) {
-  const p = G.player;
-  const input = G.input;
-  if (G.playerCar) {
-    const { dx, dy } = input.consumeMouse();
-    G.camYaw -= dx * 0.0032;
-    G.camPitch = Math.max(-0.2, Math.min(0.6, G.camPitch + dy * 0.0022));
-    if (input.wheel) G.camDist = Math.max(6, Math.min(16, G.camDist + input.wheel * 0.01));
-    if (input.wasPressed('KeyC')) G.camDist = G.camDist > 10 ? 7 : 13;
-    if (Math.abs(dx) < 0.5 && Math.abs(G.playerCar.speed) > 3) {
-      let target = G.playerCar.yaw + Math.PI;
-      let diff = target - G.camYaw;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      G.camYaw += diff * Math.min(1, dt * 1.2);
-    }
-  }
-  const dist = G.playerCar ? G.camDist + 4 : G.camDist;
-  const height = 2.6 + G.camPitch * 6 + (G.playerCar ? 1.6 : 0);
-  const cx = p.pos.x + Math.sin(G.camYaw) * dist;
-  const cz = p.pos.z + Math.cos(G.camYaw) * dist;
-  const tx = p.pos.x, tz = p.pos.z, ty = p.pos.y + 1.6;
-  G.camera.position.x += (cx - G.camera.position.x) * Math.min(1, dt * 8);
-  G.camera.position.y += (height - G.camera.position.y) * Math.min(1, dt * 8);
-  G.camera.position.z += (cz - G.camera.position.z) * Math.min(1, dt * 8);
-  G.camera.lookAt(tx, ty, tz);
+  const P = {
+    group: g, x: 0, z: 30, y: 0, vy: 0, heading: 0, camYaw: Math.PI, camPitch: 0.32, camDist: 9,
+    walkPhase: 0, inCar: false,
+    reset(x, z, yaw) { P.x = x; P.z = z; P.heading = yaw ?? Math.PI; P.camYaw = P.heading; P.vy = 0; P.y = 0; },
+    update(dt) {
+      if (P.inCar) { g.visible = false; if (G.car) { P.x = G.car.x; P.z = G.car.z; P.heading = G.car.heading; } return; }
+      g.visible = true;
+      const look = G.input.look();
+      P.camYaw -= look.x * 0.0032; P.camPitch = clamp(P.camPitch + look.y * 0.0022, -0.1, 0.9);
+      P.camDist = clamp(P.camDist + G.input.wheelDelta() * 0.01, 5, 16);
+      if (G.input.pressed('KeyC')) P.camDist = P.camDist > 10 ? 7 : 13;
+      const ax = G.input.axis();
+      const run = G.input.down('ShiftLeft') || G.input.down('ShiftRight');
+      const sp = run ? CONFIG.runSpeed : CONFIG.walkSpeed;
+      const mx = Math.sin(P.camYaw) * ax.y + Math.cos(P.camYaw) * ax.x;
+      const mz = Math.cos(P.camYaw) * ax.y - Math.sin(P.camYaw) * ax.x;
+      const moving = Math.hypot(mx, mz) > 0.01;
+      if (moving) {
+        P.heading = angLerp(P.heading, Math.atan2(mx, mz), Math.min(1, dt * 12));
+        const nx = P.x + mx * sp * dt, nz = P.z + mz * sp * dt;
+        const f = G.city.collide(nx, nz, 0.5);
+        P.x = f.x; P.z = f.z;
+        P.walkPhase += dt * sp * 1.6;
+      }
+      if (G.input.pressed('Space') && P.y <= 0.01) P.vy = CONFIG.jumpV;
+      P.vy -= CONFIG.gravity * dt; P.y += P.vy * dt;
+      if (P.y < 0) { P.y = 0; P.vy = 0; }
+      const sw = moving ? Math.sin(P.walkPhase) * (run ? 0.8 : 0.55) : 0;
+      legL.rotation.x = sw; legR.rotation.x = -sw; armL.rotation.x = -sw; armR.rotation.x = sw;
+      g.position.set(P.x, P.y + Math.abs(Math.sin(P.walkPhase)) * (moving ? 0.06 : 0), P.z);
+      g.rotation.y = P.heading;
+      g.rotation.x = run && moving ? 0.12 : 0;
+    },
+    enterCar(car) {
+      P.inCar = true; G.car = car; car.parked = false;
+      G.audio.unlock();
+      G.hud.prompt('');
+    },
+    exitCar() {
+      if (!G.car) return;
+      const car = G.car;
+      P.inCar = false; G.car = null;
+      P.x = car.x - Math.sin(car.heading + Math.PI / 2) * 2.4;
+      P.z = car.z - Math.cos(car.heading + Math.PI / 2) * 2.4;
+      P.heading = car.heading;
+      const f = G.city.collide(P.x, P.z, 0.5); P.x = f.x; P.z = f.z;
+    },
+    stealCar(car) {
+      if (car.driver) { // pull the driver out
+        const d = car.driver; d.group.visible = true; d.x = car.x + 3; d.z = car.z + 2; d.flee = 4;
+        car.driver = null;
+      }
+      if (G.police.cars.length > 0 || G.police.cops.length > 0) G.police.addWanted(1); // seen stealing
+      G.stats.stolen++;
+      P.enterCar(car);
+      G.hud.ticker('You stole the ' + car.name);
+    },
+  };
+  return P;
 }

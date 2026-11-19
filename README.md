@@ -1,59 +1,31 @@
 # SOLARA BAY
 
-A 3D open-world crime game set in a bright coastal city, made with three.js.
-You play **Ro Mendez**, a getaway driver who has come home to Solara Bay
-owing money to fixer **Sal Vega** — and with a score to settle against
-developer **Dario Kane**. Lift cars, shake off the police, and work through
-six story missions across six districts.
-
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-This is an entry for the [make.fun bounty](https://make.fun/bounty/gta6-01)
-"Make GTA 6" ($1,666 in USDC, top 100).
+Entered in the [make.fun bounty](https://make.fun/bounty/gta6-01) "Make GTA 6" ($1,666 in USDC, top 100).
 
-## Playing
+**SOLARA BAY** is an open-world crime game in the desktop browser (three.js, offline, no network requests). You're **Nico**, a getaway driver back in Solara Bay, in debt to fixer Sal Vega. Work 8 jobs for the crew — courier runs, dock heists, a neon tail, and the **Golden Hour** finale: lose the PCPD manhunt before Marco's boat sails. Steal cars, dodge the helicopter, fish off the pier, race on the Malecón, and catch the sunset.
 
-- **WASD** walk / drive · **Mouse** look around · **Shift** sprint / handbrake · **Space** jump
-- **E** get into or steal a car (or climb back out) · **Left click** punch / fire
-- **R** reload · **1 / 2** fists / pistol · **M** mute · **Esc** pause
-- **C** pull the camera back · **F** headlights
+## How to play
 
-Grab a car, then drop your wanted stars by laying low or paying for a new
-paint job at Spray & Shine, and chase the yellow beacon to the next mission
-checkpoint. Cash comes from missions, taxi fares, stunt jumps, and 30 sun
-coins tucked around the city. Your progress is saved on its own after every
-mission and whenever you roll into the garage.
+- **WASD** move / drive · **Mouse** look · **SHIFT** run / handbrake · **SPACE** jump
+- **E** enter / steal car, talk, fish, buy, respray · **Click** shoot · **1–5** weapons · **R** reload
+- **M** mute · **ESC** pause · **F3** FPS · **C** camera distance
 
-## Running it
+Systems: on-foot + driving (8 car models), traffic + pedestrians, wanted 0–5 with PCPD cars, foot cops, roadblocks and a helicopter, 8 story missions + taxi fares, stunt jumps, 30 sun coins, fishing, street races and a beach party, fists + 4 guns, shops (Cal's Guns, Spray & Shine), HUD with circular minimap, radio CELESTE 98.1, day–night cycle with golden-hour sunsets, and localStorage saves.
+
+## Run it
 
 ```sh
 node serve.ts
 # open http://localhost:8080
 ```
 
-Static files and nothing else — no build step, no network calls. three.js
-ships vendored under `game/vendor/`.
-
 ## Screenshots
 
-- **1-chase.jpg** — a downtown chase in the afternoon: wanted ★★★, two
-  police cars behind you, HUD with minimap, speed, and a mission objective.
-- **2-drive.jpg** — a coastal road at golden hour: a sport car, traffic,
-  pedestrians, and the sea beyond the boardwalk.
-- **3-street.jpg** — an Old Solara market in daylight, on foot: Ro among
-  pedestrians, with a mission NPC and a prompt.
-- **4-night.jpg** — Marina Bay after dark: glowing signs, headlights,
-  wanted ★, the pier and the ferris wheel.
-
-## The city
-
-Six districts — Marina Bay, Old Solara, The Spires, The Docks, Vista Hills,
-Calle Verde — holding around 120 procedurally built buildings, moving
-traffic and pedestrians, a wanted system with patrol cars and officers on
-foot, 6 story missions, combat, a full day–night cycle with neon nights,
-and synthesized WebAudio sound and music.
-
-Every name, character, vehicle, story beat, piece of art, sound, and tune
-is original.
+1. `1-chase.jpg` — Golden Hour finale: wanted ★★★★, PCPD response list, helicopter, Marco on the radio
+2. `2-drive.jpg` — Golden-hour drive down the Malecón to meet Marco at Marlin Ceviche
+3. `3-street.jpg` — On foot in Old Solara, meeting Marco
+4. `4-night.jpg` — Neon Nights tail job in Marina Bay

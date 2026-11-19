@@ -1,86 +1,56 @@
-// SOLARA BAY — grab the dossier screenshots with Playwright.
-// Headless Chromium on this VM wants the WebGL policy file, and
-// localhost is refused by local-network-access checks, so the game files
-// are served straight from disk through page.route and the page loads
-// under a made-up registrable host instead.
+// Screenshot tool: renders ?shot= scenes headless, 1280x720 JPEG q92.
+// Usage: node tools/shot.mjs [scene] [out-name] — no args = all 4 dossier shots.
 import { chromium } from '/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright/index.mjs';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const GAME_DIR = '/home/hatch/workspace/makefun-all/gta6-01/repo/game';
-const SHOT_DIR = '/home/hatch/workspace/makefun-all/gta6-01/repo/screenshots';
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg' };
-// Pass one scene name to capture just that scene; the dossier itself
-// uses four shots (all seed 8, see shots.json) while harbor stays
-// manual-only and never lands in the dossier.
-const single = process.argv[2] || null;
-const SHOT_LIST = [
-  ['chase', '1-chase.jpg'],
-  ['drive', '2-drive.jpg'],
-  ['street', '3-street.jpg'],
-  ['night', '4-night.jpg'],
-  ['harbor', '5-harbor.jpg'],
-].filter(([scene]) => !single || scene === single);
+const repo = join(dirname(fileURLToPath(import.meta.url)), '..');
+const gameDir = join(repo, 'game');
+const shots = JSON.parse(readFileSync(join(repo, 'shots.json'), 'utf8'));
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const POLICY_SHA = '7bb678df967ebb65e8b80fd6869d629166db1ea7006957942fadb62a109f109d';
 
-const cleanEnv = {
-  ...process.env,
-  http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '',
-  all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*',
-};
-const chrome = await chromium.launch({
-  executablePath: '/opt/meta-chromium/chrome',
-  env: cleanEnv,
-  args: [
-    '--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
-    '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
-    '--hatch-webgl-allowed-domains-sha256=7bb678df967ebb65e8b80fd6869d629166db1ea7006957942fadb62a109f109d',
-  ],
-});
-
-let failures = 0;
-for (const [scene, file] of SHOT_LIST) {
-  const page = await chrome.newPage({ viewport: { width: 1280, height: 720 } });
-  await page.route('**/*', async (route) => {
+async function take(name, query) {
+  const browser = await chromium.launch({
+    executablePath: '/opt/meta-chromium/chrome',
+    env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*' },
+    args: ['--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
+      '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
+      '--hatch-webgl-allowed-domains-sha256=' + POLICY_SHA],
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('pageerror', (e) => errors.push('page: ' + e.message));
+  await page.route('**/solarabay.game/**', async (route) => {
     const url = new URL(route.request().url());
-    const requestPath = url.pathname === '/' ? '/index.html' : url.pathname;
-    const fullPath = join(GAME_DIR, requestPath);
-    if (existsSync(fullPath)) {
-      await route.fulfill({
-        status: 200,
-        contentType: TYPES[extname(fullPath)] || 'application/octet-stream',
-        body: readFileSync(fullPath),
-      });
-    } else {
-      console.log(scene, 'missing', requestPath);
-      await route.fulfill({ status: 404, body: 'not found' });
-    }
+    let p = url.pathname === '/' ? '/index.html' : url.pathname;
+    const file = join(gameDir, decodeURIComponent(p));
+    if (!existsSync(file) || !file.startsWith(gameDir)) return route.abort();
+    const ext = p.slice(p.lastIndexOf('.'));
+    route.fulfill({ body: readFileSync(file), contentType: MIME[ext] || 'application/octet-stream' });
   });
-  page.on('console', (message) => {
-    if (message.type() === 'error') {
-      failures += 1;
-      console.log(scene, 'console-error:', message.text());
-    }
-  });
-  page.on('pageerror', (err) => {
-    failures += 1;
-    console.log(scene, 'pageerror:', String(err));
-  });
-  await page.goto(`http://solarabay.game/?shot=${scene}&seed=8`, { waitUntil: 'load', timeout: 60000 });
+  await page.goto('http://solarabay.game/' + query, { waitUntil: 'load', timeout: 60000 });
   try {
-    // Supersampled frames are slow under SwiftShader (a chase frame
-    // can take ~15 s), so the ready wait gets a generous budget.
-    await page.waitForFunction(() => window.__shotReady, null, { timeout: 180000 });
-  } catch {
-    console.log(scene, 'shotReady timeout');
-    failures += 1;
-  }
+    await page.waitForFunction(() => window.__shotReady === true, undefined, { timeout: 180000 });
+  } catch { errors.push('timeout waiting for __shotReady'); }
   await page.waitForTimeout(400);
-  // Round 6: quality 92 — the supersampled frames have the detail to
-  // justify it, and the files still sit well under the 256 KiB cap.
-  await page.screenshot({ path: `${SHOT_DIR}/${file}`, type: 'jpeg', quality: 92, timeout: 120000 });
-  console.log(scene, '->', file);
-  await page.close();
+  const out = join(repo, 'screenshots', name);
+  await page.screenshot({ path: out, type: 'jpeg', quality: 92, timeout: 300000 });
+  const state = await page.evaluate(() => (window.__game ? window.__game() : null));
+  await browser.close();
+  console.log(name, JSON.stringify(state), errors.length ? 'ERRORS: ' + errors.join(' | ') : '0 errors');
+  return errors;
 }
-await chrome.close();
-console.log('done, errors:', failures);
-process.exit(failures > 0 ? 1 : 0);
+
+const only = process.argv[2];
+let allErr = [];
+if (only) {
+  const s = shots.find((x) => x.name.startsWith(only) || x.query.includes('shot=' + only));
+  const scene = only, name = process.argv[3] || (s ? s.name : only + '.jpg');
+  allErr = await take(name, '?shot=' + scene + '&seed=9');
+} else {
+  for (const s of shots) allErr = allErr.concat(await take(s.name, s.query));
+}
+if (allErr.length) { console.error('SHOT ERRORS: ' + allErr.length); process.exit(1); }

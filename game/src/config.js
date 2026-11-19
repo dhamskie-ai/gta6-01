@@ -1,148 +1,58 @@
-// SOLARA BAY — every tunable number: movement, driving, prices,
-// wanted behaviour, the day clock, city size, beach life.
+// Tuning, districts, cars, weapons, radio — everything the systems read.
 export const CONFIG = {
-  cityHalf: 300,
-  streetStep: 60,
-  streetMin: -240,
-  streetMax: 240,
-  roadHalf: 5,
-  walkSpeed: 4.2,
-  runSpeed: 7.5,
-  jumpSpeed: 7.5,
-  gravity: 20,
-  carAccel: 16,
-  carBrake: 30,
-  carReverseMax: 12,
-  carDrag: 0.6,
-  trafficCount: 20,
-  pedCount: 30,
-  parkedCount: 16,
-  wantedDecayHidden: 10,
-  wantedClearHidden: 20,
-  resprayPerStar: 100,
-  pistolPrice: 250,
-  armorPrice: 150,
-  taxiFare: 60,
-  jumpReward: 80,
-  coinValue: 25,
-  fishMin: 10,
-  fishMax: 40,
-  raceEvery: 75,
-  dayLength: 480,
-  maxWanted: 5,
+  world: 640, half: 320, roadGap: 120, roadW: 14,
+  trafficCount: 20, pedCount: 36, parkedCount: 16, sunCoins: 30,
+  walkSpeed: 6, runSpeed: 10, jumpV: 8, gravity: 22,
+  wantedDecaySeen: 10, wantedDecayHidden: 20, resprayPerStar: 100,
+  dayLength: 480, // seconds of play per full 24h cycle
+  districts: [
+    { name: 'Malecón Celeste', x0: -320, x1: -180, z0: -320, z1: 320, tall: 0 },
+    { name: 'Marina Bay', x0: -180, x1: -60, z0: -320, z1: -40, tall: 0 },
+    { name: 'The Spires', x0: -60, x1: 180, z0: -320, z1: -40, tall: 1 },
+    { name: 'The Docks', x0: 180, x1: 320, z0: -320, z1: 40, tall: 0 },
+    { name: 'Old Solara', x0: -180, x1: 180, z0: -40, z1: 200, tall: 0 },
+    { name: 'Vista Hills', x0: 180, x1: 320, z0: 40, z1: 320, tall: 0 },
+    { name: 'Coral Strand', x0: -180, x1: 180, z0: 200, z1: 320, tall: 0 },
+    { name: 'Calle Verde', x0: -60, x1: 180, z0: 40, z1: 200, tall: 0 },
+  ],
+  cars: {
+    sedan: { name: 'Cometa', color: 0x3d7ac2, top: 32, accel: 14, turn: 1.9 },
+    hatch: { name: 'Pip', color: 0xe8a13a, top: 28, accel: 13, turn: 2.1 },
+    taxi: { name: 'Cabro', color: 0xf2c200, top: 30, accel: 13, turn: 2.0 },
+    van: { name: 'Mula', color: 0x8a8f98, top: 25, accel: 10, turn: 1.6 },
+    sport: { name: 'Veloz Comet RS', color: 0xff2e7e, top: 46, accel: 20, turn: 2.4 },
+    truck: { name: 'Hauler', color: 0x4a6b4f, top: 24, accel: 9, turn: 1.4 },
+    bus: { name: 'Solara Bus', color: 0x2a9d8f, top: 22, accel: 8, turn: 1.3 },
+    taco: { name: 'Taco Truck', color: 0xe85d3d, top: 23, accel: 9, turn: 1.5 },
+    police: { name: 'PCPD Interceptor', color: 0x1c2733, top: 38, accel: 17, turn: 2.2 },
+  },
+  weapons: [
+    { id: 'fists', name: 'FISTS', ammo: Infinity, max: Infinity, dmg: 20, rate: 0.45, auto: false, price: 0 },
+    { id: 'vesper', name: 'VESPER', ammo: 72, max: 72, dmg: 25, rate: 0.28, auto: false, price: 0 },
+    { id: 'mako', name: 'MAKO', ammo: 150, max: 150, dmg: 16, rate: 0.09, auto: true, price: 1200 },
+    { id: 'breaker', name: 'BREAKER', ammo: 0, max: 24, dmg: 70, rate: 0.9, auto: false, price: 3800 },
+    { id: 'kestrel', name: 'KESTREL', ammo: 0, max: 40, dmg: 55, rate: 0.5, auto: false, price: 0, locked: true },
+  ],
+  radio: { station: 'CELESTE 98.1', tracks: ['Malecón Mirage · Vela Roja', 'Midnight Marina · Vela', 'Sunset Strip · The Palms', 'Neon Drive · Coral Skies'] },
+  policeNames: ['PELICAN-11', 'GECKO-25', 'AIR-1', 'BARRACUDA-18', 'TAC-45', 'IBIS-43', 'TARPON-19', 'HERON-17', 'KESTREL-31'],
+  respectTitles: [[0, 'ROOKIE'], [100, 'HUSTLER'], [250, 'SHOT CALLER'], [550, 'KINGPIN']],
+  garage: { x: -60, z: -30 },
+  gunShop: { x: 60, z: 120 },
+  sprayShop: { x: -120, z: 60 },
+  pier: { x: -288, z: 150 },
+  marlin: { x: -240, z: 90 },
+  ferris: { x: -252, z: -90 },
+  lighthouse: { x: -292, z: -210 },
 };
-export const CAR_MODELS = {
-  sedan:    { color: 0x3f6fb5, len: 4.4, wid: 1.9, name: 'Cometa',     top: 34, accel: 1.0,  grip: 1.0 },
-  hatch:    { color: 0xd94f3d, len: 3.8, wid: 1.8, name: 'Pip',        top: 30, accel: 0.95, grip: 1.1 },
-  taxi:     { color: 0xf2c200, len: 4.4, wid: 1.9, name: 'Cabro',      top: 32, accel: 1.0,  grip: 1.0 },
-  van:      { color: 0x7a7f85, len: 5.0, wid: 2.1, name: 'Mula',       top: 26, accel: 0.8,  grip: 0.9 },
-  sport:    { color: 0xff2e7e, len: 4.5, wid: 2.0, name: 'Veloce GT',  top: 46, accel: 1.35, grip: 1.25 },
-  truck:    { color: 0x2e7d5b, len: 6.2, wid: 2.3, name: 'Hauler',     top: 24, accel: 0.7,  grip: 0.85 },
-  bus:      { color: 0x2e7dc2, len: 8.0, wid: 2.4, name: 'Solara Bus', top: 22, accel: 0.6,  grip: 0.8 },
-  foodtruck:{ color: 0xff8a3d, len: 5.2, wid: 2.2, name: 'Taco Truck', top: 24, accel: 0.75, grip: 0.85 },
-};
-export const PAINT_COLORS = [
-  0xc23b2e, 0x2e7dc2, 0x3fae5a, 0xd8a02a, 0x8a5fc2, 0xe8e8e8,
-  0x2c2f36, 0xd94f8a, 0x3fb5a8, 0xb56a2e, 0x6a8a3a, 0x9a3ad8,
-];
-export const DISTRICTS = [
-  { name: 'Coral Strand', test: (x, z) => x < -258, style: 'beach' },
-  { name: 'Marina Bay',  test: (x, z) => x < -180, style: 'marina' },
-  { name: 'The Docks',   test: (x, z) => x > 180, style: 'docks' },
-  { name: 'Vista Hills', test: (x, z) => z < -180, style: 'hills' },
-  { name: 'The Spires',  test: (x, z) => Math.abs(x) <= 120 && Math.abs(z) <= 120, style: 'spires' },
-  { name: 'Old Solara',  test: (x, z) => z > 60 && Math.abs(x) <= 180, style: 'oldsolara' },
-  { name: 'Calle Verde', test: () => true, style: 'verde' },
-];
 export function districtAt(x, z) {
-  for (const district of DISTRICTS) {
-    if (district.test(x, z)) return district;
-  }
-  return DISTRICTS[DISTRICTS.length - 1];
+  for (const d of CONFIG.districts) if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d.name;
+  return 'Solara Bay';
 }
-export const MISSIONS = [
-  {
-    id: 1, name: 'First Gear', reward: 150,
-    briefing: 'Sal Vega: Ro, you owe me. Start simple — steal that parked Cometa and bring it to Mara at the garage. Keep it clean.',
-    steps: [
-      { text: 'Steal the parked car (press E near it)', kind: 'steal', pos: [2.5, 36] },
-      { text: 'Drive to Mara\'s Garage', kind: 'goto', pos: [-60, -30], radius: 10 },
-    ],
-  },
-  {
-    id: 2, name: 'Courier Run', reward: 250, time: 240,
-    briefing: 'Kip: Three parcels, four minutes. Sal\'s clients don\'t wait. Don\'t smash the goods.',
-    steps: [
-      { text: 'Deliver parcel 1 — Calle Verde', kind: 'goto', pos: [-150, 120], radius: 9 },
-      { text: 'Deliver parcel 2 — The Docks', kind: 'goto', pos: [210, 0], radius: 9 },
-      { text: 'Deliver parcel 3 — Vista Hills', kind: 'goto', pos: [90, -180], radius: 9 },
-    ],
-  },
-  {
-    id: 3, name: 'The Docks Job', reward: 400,
-    briefing: 'Sal Vega: Kane\'s crew guards a Hauler full of his imports at the Docks. Take it. Expect trouble.',
-    steps: [
-      { text: 'Reach the Docks yard', kind: 'goto', pos: [210, 90], radius: 12 },
-      { text: 'Deal with the 4 guards', kind: 'clear', pos: [210, 90], count: 4 },
-      { text: 'Steal the Hauler and drive it to the garage', kind: 'stealTruck', pos: [222, 96] },
-      { text: 'Deliver the Hauler to Mara\'s Garage', kind: 'goto', pos: [-60, -30], radius: 10 },
-    ],
-  },
-  {
-    id: 4, name: 'Neon Nights', reward: 500,
-    briefing: 'Kip: Kane\'s courier leaves the Marina at night. Tail him — stay back, don\'t spook him. When he runs, chase him down.',
-    steps: [
-      { text: 'Wait for the courier near the pier (night)', kind: 'wait', pos: [-240, 30], radius: 14 },
-      { text: 'Tail the courier — stay within 40 m, don\'t get closer than 12 m', kind: 'tail', pos: [-180, 60], radius: 40 },
-      { text: 'Chase the courier down — ram his car to stop it', kind: 'chase', pos: [-120, 120], radius: 30 },
-    ],
-  },
-  {
-    id: 5, name: 'Bay Heist', reward: 1000,
-    briefing: 'Sal Vega: The finale, Ro. Kane\'s show car — a Veloce GT Aurelia — sits in the Spires penthouse garage. Take it to the pier. This ends the debt.',
-    steps: [
-      { text: 'Reach the Spires penthouse garage', kind: 'goto', pos: [30, 0], radius: 10 },
-      { text: 'Steal the Veloce GT Aurelia', kind: 'steal', pos: [36, 0] },
-      { text: 'Escape the 4-star chase to the Marina pier', kind: 'escape', pos: [-240, 0], radius: 14 },
-    ],
-  },
-  {
-    id: 6, name: 'Harbor Lights', reward: 600,
-    briefing: 'Sal Vega: Your debt is paid, Ro — but Kane\'s last shipment is still sitting at the harbor, lights on and nobody watching it. Mara needs the manifest out of that Hauler, and Kip already has a buyer lined up. One final job, then the bay is really yours.',
-    steps: [
-      { text: 'Get to the harbor pier as dusk falls', kind: 'goto', pos: [210, 30], radius: 12 },
-      { text: 'Take out Kane\'s remaining guards on the pier', kind: 'clear', pos: [216, 36], count: 3 },
-      { text: 'Steal the Hauler carrying the harbor manifest', kind: 'stealTruck', pos: [222, 36] },
-      { text: 'Bring the Hauler back to Mara\'s Garage', kind: 'goto', pos: [-60, -30], radius: 10 },
-    ],
-  },
-];
-export const TAXI_SPOTS = [
-  [-150, 120],
-  [150, -120],
-  [30, 120],
-  [-150, -60],
-  [90, 60],
-];
-export const JUMP_RAMPS = [
-  [-60, 0],
-  [120, 60],
-  [0, -180],
-];
-export const SHOP_POS = {
-  guns: [60, 120],
-  spray: [-60, 30],
-  garage: [-60, -30],
-};
-export const FISH_SPOT = [-338, 0];
-export const PARTY_POS = [-280, 60];
-export const FOOD_TRUCK_SPOTS = [
-  [-268, 80],
-  [-24, 156],
-];
-export const PED_NAMES = [
-  'Ana', 'Beto', 'Cleo', 'Dario', 'Elsa',
-  'Finn', 'Gia', 'Hugo', 'Ines', 'Joel',
-  'Lena', 'Marco', 'Nia', 'Omar', 'Pia',
-  'Rosa', 'Tomas', 'Uma', 'Vic', 'Wren',
-];
+export function respectTitle(xp) {
+  let t = 'ROOKIE';
+  for (const [min, name] of CONFIG.respectTitles) if (xp >= min) t = name;
+  const next = CONFIG.respectTitles.find(([min]) => min > xp);
+  return { title: t, next: next ? next[0] : xp };
+}
+export const fmtCash = (n) => '$' + Math.floor(n).toLocaleString('en-US');
+export const fmtTime = (s) => { s = Math.max(0, Math.ceil(s)); return String(Math.floor(s / 60)).padStart(1, '0') + ':' + String(s % 60).padStart(2, '0'); };

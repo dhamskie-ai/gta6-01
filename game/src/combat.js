@@ -1,153 +1,147 @@
-// Combat: fists + pistol, enemy guards, health/armor, tracers, pickups.
+// Combat: fists + 4 guns, guards, health/armor, shops, pickups.
 import * as THREE from 'three';
-import { removePed } from './traffic.js';
+import { CONFIG } from './config.js';
+import { mulberry32, range, pick, chance, clamp } from './random.js';
+
 export function createCombat(G) {
-  G.enemies = [];
-  G.tracers = [];
-  G.pickups = [];
-  const geo = new THREE.BoxGeometry(0.08, 0.08, 1);
-  G.tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe14a });
-  G.tracerGeo = geo;
-}
-export function spawnGuard(G, x, z) {
-  const ped = G.spawnPed(x, z);
-  if (!ped) return null;
-  ped.state = 'guard'; ped.hp = 60; ped.speed = 3.0; ped.shootT = 0; ped.accuracy = 0.25;
-  G.pedMeshes.body.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
-  G.pedMeshes.armL.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
-  G.pedMeshes.armR.setColorAt(ped.slot, new THREE.Color(0x3a3a3a));
-  G.pedMeshes.body.instanceColor.needsUpdate = true;
-  G.pedMeshes.armL.instanceColor.needsUpdate = true;
-  G.pedMeshes.armR.instanceColor.needsUpdate = true;
-  G.enemies.push(ped);
-  return ped;
-}
-export function spawnPickup(G, kind, x, z) {
-  const color = kind === 'health' ? 0x3ddc5f : 0x4aa8ff;
-  const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7),
-    new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.5 }));
-  m.position.set(x, 0.8, z);
-  G.scene.add(m);
-  G.pickups.push({ mesh: m, kind, x, z });
-}
-function fireTracer(G, from, to) {
-  const m = new THREE.Mesh(G.tracerGeo, G.tracerMat);
-  const mid = from.clone().add(to).multiplyScalar(0.5);
-  m.position.copy(mid);
-  m.lookAt(to);
-  m.scale.set(1, 1, from.distanceTo(to));
-  G.scene.add(m);
-  G.tracers.push({ mesh: m, life: 0.08 });
-}
-export function playerShoot(G) {
-  const p = G.player;
-  if (p.weapon === 0) {
-    G.audio.punch();
-    const target = nearestFoe(G, 2.4);
-    if (target) damageFoe(G, target, 25);
-    return;
+  const r = mulberry32(G.seed + 17);
+  const enemies = [];
+  let cooldown = 0, lastShotT = -99, reloading = false, reloadT = 0;
+  let mouseDown = false, mousePressed = false;
+  addEventListener('mousedown', (e) => { if (e.button === 0) { mouseDown = true; mousePressed = true; } });
+  addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
+  function guardFigure() {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.34), mat); body.position.y = 1.1; g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), new THREE.MeshLambertMaterial({ color: 0xc89878 })); head.position.y = 1.72; g.add(head);
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), new THREE.MeshLambertMaterial({ color: 0x111111 })); gun.position.set(0.3, 1.2, 0.4); g.add(gun);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.65, 0.2), mat); legL.position.set(-0.15, 0.33, 0); g.add(legL);
+    const legR = legL.clone(); legR.position.x = 0.15; g.add(legR);
+    G.scene.add(g);
+    return { group: g, legL, legR };
   }
-  if (p.ammo <= 0) { G.audio.tone(180, 0.1, 'square', 0.15); return; }
-  p.ammo--;
-  G.audio.shot();
-  G.lastShotT = G.time;
-  G.muzzleT = 0.06;
-  addWantedOnce(G);
-  const dir = new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
-  const from = p.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
-  const to = from.clone().add(dir.clone().multiplyScalar(60));
-  fireTracer(G, from, to);
-  let best = null, bd = 3;
-  for (const foe of [...G.enemies, ...G.footPolice]) {
-    const fx = foe.x - from.x, fz = foe.z - from.z;
-    const along = fx * dir.x + fz * dir.z;
-    if (along < 0 || along > 60) continue;
-    const perp = Math.abs(fx * dir.z - fz * dir.x);
-    if (perp < bd) { bd = perp; best = foe; }
+  function spawnGuard(x, z) {
+    const f = guardFigure();
+    const e = { ...f, x, z, hp: 50, heading: 0, shootT: range(r, 1, 2), phase: 0 };
+    f.group.position.set(x, 0, z);
+    enemies.push(e); return e;
   }
-  if (best) damageFoe(G, best, 34);
-}
-let wantedGiven = false;
-function addWantedOnce(G) {
-  if (!wantedGiven) { wantedGiven = true; G.addWanted(1, 'fired a weapon'); }
-  setTimeout(() => { wantedGiven = false; }, 8000);
-}
-function nearestFoe(G, range) {
-  const p = G.player.pos;
-  let best = null, bd = range;
-  for (const foe of [...G.enemies, ...G.footPolice]) {
-    const d = Math.hypot(foe.x - p.x, foe.z - p.z);
-    if (d < bd) { bd = d; best = foe; }
+  function clearEnemies() {
+    for (const e of [...enemies]) { G.scene.remove(e.group); enemies.splice(enemies.indexOf(e), 1); }
   }
-  return best;
-}
-export function damageFoe(G, foe, dmg) {
-  foe.hp = (foe.hp ?? 50) - dmg;
-  G.effects.burst(foe.x, 1.4, foe.z, 0xff5555, 8);
-  if (foe.hp <= 0) {
-    removePed(G, foe);
-    G.enemies.splice(G.enemies.indexOf(foe), 1);
-    G.footPolice.splice(G.footPolice.indexOf(foe), 1);
-    G.missionFoesLeft = Math.max(0, (G.missionFoesLeft || 0) - 1);
-    G.audio.noise(0.2, 0.3, 300);
+  function curWeapon() { return G.weapons[G.weaponIndex]; }
+  function hurtPlayer(dmg, src) {
+    if (G.phase !== 'play') return;
+    if (G.armor > 0) { const ab = Math.min(G.armor, dmg); G.armor -= ab; dmg -= ab; }
+    G.health -= dmg;
+    G.hud.flashDamage();
+    if (G.health <= 0) { G.health = 0; G.phase = 'dead'; G.missions.failMission('K.O. — Nico is down.'); }
   }
-}
-export function damagePlayer(G, dmg) {
-  const p = G.player;
-  if (p.armor > 0) {
-    const absorbed = Math.min(p.armor, dmg);
-    p.armor -= absorbed;
-    dmg -= absorbed;
-  }
-  p.health -= dmg;
-  G.hud.flashDamage();
-  if (p.health <= 0) { p.health = 0; G.wasted(); }
-}
-export function updateCombat(G, dt) {
-  const p = G.player;
-  if (G.input.wasPressed('Digit1')) { p.weapon = 0; G.audio.pickup(); }
-  if (G.input.wasPressed('Digit2') && p.hasPistol) { p.weapon = 1; G.audio.pickup(); }
-  if (G.input.wasPressed('KeyR') && p.weapon === 1) {
-    if (p.cash >= 20) { p.cash -= 20; p.ammo = 12; G.hud.toast('Ammo refilled — $20'); }
-    else { p.ammo = 6; G.hud.toast('Ammo refilled (6) — broke, huh'); }
-  }
-  if (G.input.mouseClicked && G.phase === 'play') playerShoot(G);
-  for (const foe of [...G.enemies]) {
-    const dx = p.pos.x - foe.x, dz = p.pos.z - foe.z;
-    const d = Math.hypot(dx, dz) || 1;
-    foe.yaw = Math.atan2(dx, dz);
-    foe.shootT -= dt;
-    if (d > 2.2) {
-      foe.x += (dx / d) * foe.speed * dt;
-      foe.z += (dz / d) * foe.speed * dt;
-    } else if (foe.shootT <= 0) {
-      foe.shootT = 1.1;
-      damagePlayer(G, 8);
-      G.audio.punch();
+  function fire() {
+    const w = curWeapon();
+    if (cooldown > 0 || reloading) return;
+    if (w.id === 'fists') {
+      cooldown = w.rate; G.audio.punch();
+      const rangeM = 2.4;
+      let best = null, bd = rangeM;
+      for (const e of enemies) { const d = Math.hypot(e.x - G.player.x, e.z - G.player.z); if (d < bd) { bd = d; best = e; } }
+      for (const c of G.police.cops) { const d = Math.hypot(c.x - G.player.x, c.z - G.player.z); if (d < bd) { bd = d; best = c; } }
+      if (best) {
+        if (best.hp !== undefined) { best.hp -= w.dmg; G.render.burst(best.x, 1.4, best.z, 0xff5a5a, 8); if (best.hp <= 0) killEnemy(best); }
+        else { G.police.addWanted(2); G.scene.remove(best.group); G.police.cops.splice(G.police.cops.indexOf(best), 1); }
+      }
+      return;
     }
-    if (d < 26 && d > 2.2 && foe.shootT <= 0) {
-      foe.shootT = 1.4;
-      const from = new THREE.Vector3(foe.x, 1.4, foe.z);
-      const to = p.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-      fireTracer(G, from, to);
-      G.audio.shot();
-      if (G.rng.chance(foe.accuracy)) damagePlayer(G, 7);
+    if (w.ammo <= 0) { reload(); return; }
+    cooldown = w.rate; w.ammo--;
+    lastShotT = G.time;
+    G.audio.shot();
+    G.police.addWanted(1);
+    const yaw = G.player.camYaw, pitch = -G.player.camPitch;
+    const ox = G.player.x, oy = G.player.y + 1.5, oz = G.player.z;
+    const dx = Math.sin(yaw) * Math.cos(pitch), dy = Math.sin(pitch), dz = Math.cos(yaw) * Math.cos(pitch);
+    let hitD = 120;
+    for (const e of enemies) {
+      const d = Math.hypot(e.x - ox, e.z - oz);
+      const along = (e.x - ox) * dx + (e.z - oz) * dz;
+      if (along > 0 && along < hitD && Math.abs((e.x - ox) * dz - (e.z - oz) * dx) < 1.6) { hitD = along; e.hp -= w.dmg; if (e.hp <= 0) killEnemy(e); }
     }
-  }
-  for (const t of [...G.tracers]) {
-    t.life -= dt;
-    if (t.life <= 0) { G.scene.remove(t.mesh); G.tracers.splice(G.tracers.indexOf(t), 1); }
-  }
-  for (const pk of [...G.pickups]) {
-    pk.mesh.rotation.y += dt * 2;
-    const d = Math.hypot(pk.x - p.pos.x, pk.z - p.pos.z);
-    if (d < 1.6) {
-      if (pk.kind === 'health') p.health = Math.min(100, p.health + 40);
-      else p.armor = Math.min(100, p.armor + 50);
-      G.audio.pickup();
-      G.scene.remove(pk.mesh);
-      G.pickups.splice(G.pickups.indexOf(pk), 1);
+    for (const c of G.police.cops) {
+      const along = (c.x - ox) * dx + (c.z - oz) * dz;
+      if (along > 0 && along < hitD && Math.abs((c.x - ox) * dz - (c.z - oz) * dx) < 1.6) { hitD = along; G.police.addWanted(1); G.scene.remove(c.group); G.police.cops.splice(G.police.cops.indexOf(c), 1); }
     }
+    G.render.tracer(ox, oy, oz, ox + dx * hitD, oy + dy * hitD, oz + dz * hitD);
+    G.render.burst(ox + dx * hitD, oy + dy * hitD, oz + dz * hitD, 0xffca7a, 6);
   }
-  if (G.muzzleT > 0) G.muzzleT -= dt;
+  function killEnemy(e) {
+    G.render.burst(e.x, 1.2, e.z, 0xff5a5a, 18);
+    G.scene.remove(e.group);
+    enemies.splice(enemies.indexOf(e), 1);
+    G.missions?.onGuardKilled?.(e);
+  }
+  function reload() {
+    const w = curWeapon();
+    if (w.id === 'fists' || w.ammo >= w.max || reloading) return;
+    reloading = true; reloadT = 1.1;
+  }
+  // pickups
+  const pickups = [];
+  function addPickup(kind, x, z) {
+    const col = kind === 'health' ? 0x5dff8f : 0x5ad8ff;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshBasicMaterial({ color: col }));
+    m.position.set(x, 0.9, z); G.scene.add(m);
+    pickups.push({ kind, mesh: m, x, z });
+  }
+  addPickup('health', 40, -100); addPickup('armor', -100, 140); addPickup('health', 200, 100);
+  return {
+    enemies, lastShotT: -99,
+    firedRecently() { return G.time - lastShotT < 6; },
+    spawnGuard, clearEnemies, hurtPlayer, reload,
+    curWeapon,
+    buyWeapon(id) {
+      const w = G.weapons.find((v) => v.id === id);
+      if (!w || w.owned || G.cash < w.price) return false;
+      G.cash -= w.price; w.owned = true; w.ammo = w.max;
+      if (id === 'kestrel') w.locked = false;
+      return true;
+    },
+    update(dt) {
+      cooldown = Math.max(0, cooldown - dt);
+      if (reloading) { reloadT -= dt; if (reloadT <= 0) { const w = curWeapon(); w.ammo = w.max; reloading = false; } }
+      if (G.input.pressed('KeyR')) reload();
+      for (let i = 1; i <= 5; i++) if (G.input.pressed('Digit' + i)) { const w = G.weapons[i - 1]; if (w.owned && !w.locked) { G.weaponIndex = i - 1; G.audio.click(); } }
+      if (mouseDown && G.phase === 'play') {
+        const w = curWeapon();
+        if (w.auto) fire();
+        else if (mousePressed) fire();
+      }
+      mousePressed = false;
+      // guards AI
+      for (const e of [...enemies]) {
+        const d = Math.hypot(G.player.x - e.x, G.player.z - e.z);
+        e.heading = Math.atan2(G.player.x - e.x, G.player.z - e.z);
+        e.group.rotation.y = e.heading;
+        e.phase += dt * 4;
+        e.legL.rotation.x = Math.sin(e.phase) * 0.5; e.legR.rotation.x = -Math.sin(e.phase) * 0.5;
+        if (d > 3) { e.x += Math.sin(e.heading) * 3.4 * dt; e.z += Math.cos(e.heading) * 3.4 * dt; e.group.position.set(e.x, 0, e.z); }
+        e.shootT -= dt;
+        if (e.shootT <= 0 && d < 42) {
+          e.shootT = range(r, 1.4, 2.4);
+          G.audio.shot();
+          if (chance(r, 0.35)) hurtPlayer(range(r, 4, 9));
+          G.render.tracer(e.x, 1.3, e.z, G.player.x, G.player.y + 1.2, G.player.z);
+        }
+      }
+      // pickups
+      for (const p of pickups) {
+        p.mesh.rotation.y += dt;
+        if (Math.hypot(G.player.x - p.x, G.player.z - p.z) < 1.8) {
+          if (p.kind === 'health') G.health = Math.min(100, G.health + 40);
+          else G.armor = Math.min(100, G.armor + 50);
+          G.audio.coin(); G.scene.remove(p.mesh); pickups.splice(pickups.indexOf(p), 1);
+        }
+      }
+    },
+  };
 }
