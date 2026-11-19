@@ -1,10 +1,8 @@
-# SOLARA BAY — make.fun gta6-01 (round 6g)
+# SOLARA BAY — Make GTA 6 (gta6-01)
 
 Open-world crime game 3D (three.js) di kota pantai fiktif Solara Bay.
-Kamu Nico, sopir pelarian yang pulang ke Solara Bay dan berutang pada
-Marco, smuggler sekaligus wheelman. Delapan misi cerita di sepanjang
-Malecón Celeste — dari curi mobil pertama sampai Golden Hour: lolos dari
-manhunt PCPD sebelum kapal Marco berlayar dari dermaga.
+Protagonis **Nico**, sopir pelarian yang pulang dan bekerja untuk **Marco**
+(smuggler/wheelman) demi melunasi utang, sambil memburu developer **Dario Kane**.
 
 ## Main
 
@@ -13,58 +11,42 @@ node serve.ts
 # buka http://localhost:8080
 ```
 
-Offline, tanpa network request. Semua art prosedural (three.js +
-canvas texture), semua suara sintetis (WebAudio). Save otomatis di
-localStorage.
+Offline, tanpa login, tanpa network request. Keyboard + mouse di desktop,
+kontrol sentuh (joystick + tombol MASUK/KELUAR/REM/KAM) di HP.
 
-## Kontrol — keyboard + mouse (desktop)
+## Kontrol
 
-- WASD jalan / nyetir, Shift lari / handbrake, Space lompat
-- Mouse: putar kamera (klik dulu untuk pointer lock), scroll / C: jarak kamera
-- E: masuk / keluar mobil, curi mobil, bicara, ambil paket
-- Klik kiri: tinju / tembak, R: reload, 1–5: ganti senjata
-- Esc: pause, M: mute, H: klakson
+- WASD jalan / nyetir, Shift lari & handbrake, Space lompat
+- E masuk / keluar mobil, mouse geser = kamera, scroll = zoom
+- Klik kiri tembak, 1/2/3 ganti senjata, R isi peluru
+- F aktivitas: taksi, balapan jalanan, mancing, foto, paket kilat
+- H klakson, M mute, Esc jeda
 
-## Kontrol — sentuh (HP / tablet)
+## Sistem
 
-Di perangkat sentuh, kontrol muncul otomatis di layar:
+- Kota 600×600 m, 7 distrik: Malecón Celeste, Marina Bay, Old Solara,
+  The Spires, The Docks, Vista Hills, Calle Verde
+- 8 misi cerita (First Gear → Golden Hour), wanted 0–5 + PCPD
+  (mobil patroli, polisi jalan kaki, helikopter di wanted ≥ 3)
+- Traffic AI 22 mobil + ~90 pejalan kaki berkerumun di Malecón, pasar,
+  kafe pantai, plaza — plus pedagang kaki lima & kios pasar
+- 7 model mobil detail (sedan, VELOZ COMET RS sport, taksi, truk, van,
+  bus, polisi) — semua bisa dicuri & dikendarai
+- Aktivitas: supir taksi (timer + bayaran), balapan jalanan dadakan lawan
+  2 AI, mancing dengan timing bar + koleksi 4 jenis ikan, 6 spot foto
+  tersembunyi, misi sampingan paket kilat
+- Siklus siang–malam: golden hour oranye-ungu, neon menyala, jendela
+  menyala, lampu depan mobil, bintang & bulan detail
+- Suara WebAudio sintetis: mesin mengikuti kecepatan, klakson, rem/skid,
+  sirene, ambien kota + kicau burung, musik pad A-minor
+- Save otomatis di localStorage setelah tiap misi
 
-- Joystick kiri bawah: jalan kaki + nyetir (maju / mundur / belok)
-- Tombol kanan bawah: MASUK (masuk / keluar mobil), REM (rem), KAM (kamera)
-- Geser jari di layar: putar kamera (pengganti mouse look)
-
-Kontrol sentuh tidak muncul di desktop — di sana tetap keyboard + mouse.
-
-## Misi (8)
-
-1. First Gear — curi mobil pertama, antar ke bengkel Mara
-2. Meet Marco — temui Marco di Marlin Ceviche
-3. Courier Run — antar 3 paket dalam 4 menit
-4. Docks Job — curi truk Hauler, lawan 4 penjaga, kabur bintang 2
-5. Neon Nights — buntuti kurir Dario di malam hari
-6. Street Race — balapan jalanan di Malecón Celeste
-7. Beach Party — pesta pantai: jetski + mancing
-8. Golden Hour — lolos manhunt bintang 4, kejar kapal Marco
-
-Aktivitas sampingan: 3 tarif taksi, 3 stunt jump, 30 sun coin,
-garasi 3 mobil, toko senjata Cal's Guns, respray Spray & Shine.
-
-## Kota
-
-6 distrik (Marina Bay, Old Solara, The Spires, The Docks, Vista Hills,
-Calle Verde), ~120 gedung berfasad HD, jalan dengan marka geometri tajam,
-palem hidup, 36 pejalan kaki, 14 mobil traffic, 14 burung, mercusuar,
-dermaga + kincir ria, bus, taco truck, jetski, siklus siang–malam penuh.
-
-## Screenshot & dossier
+## Dossier
 
 ```sh
-node tools/shot.mjs            # 4 screenshot 1280x720 (lihat shots.json)
-node tools/playtest.mjs        # playtest 6 langkah + playtest sentuh
-MAKEFUN_OUTPUT_DIR=out node main.ts   # dossier.json
+MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
 ## Lisensi
 
-MIT — lihat LICENSE. Semua nama, karakter, kendaraan, dan musik original.
-Bukan Vice City / Los Santos / Liberty City, tanpa aset Rockstar.
+MIT — lihat `LICENSE`.

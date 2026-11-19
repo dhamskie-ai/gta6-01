@@ -1,105 +1,72 @@
-// Scene deterministik ?shot= untuk screenshot: atur posisi pemain/mobil/
-// polisi, wanted, jam, misi aktif, lalu set window.__shotReady setelah
-// beberapa frame. Dipakai tools/shot.mjs. Game tetap jalan normal.
-import { createCar } from './vehicles.js';
+// Scene deterministik ?shot= + window.__shotReady + window.__game.
+import { G } from './config.js';
+import { spawnVehicle } from './vehicles.js';
+import { startMission } from './missions.js';
 import { addWanted } from './police.js';
-import { MALECON_X, nearestNode } from './city.js';
-import { makePersonModel } from './traffic.js';
-import { mulberry32 } from './random.js';
-
-function placeTrafficOnMalecon(W, count) {
-  const T = W.traffic;
-  let placed = 0;
-  for (const t of T.cars) {
-    if (placed >= count) break;
-    const z = -40 + placed * 70;
-    const from = nearestNode(W, MALECON_X(z), z);
-    const links = W.city.nodes[from].links;
-    if (!links.length) continue;
-    t.from = from; t.to = links[0]; t.t = 0.2 + placed * 0.2;
-    placed++;
+import { distToMissionCar } from './player.js';
+let frames = 0;
+export function setupShot() {
+  const q = new URLSearchParams(location.search);
+  G.shot = q.get('shot') || '';
+  if (!G.shot) return;
+  G.state = 'playing';
+  document.getElementById('title').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+  const placeCar = (x, z, heading) => {
+    const v = G.vehicles.find((x) => x.type === 'sport' && x.parked) || spawnVehicle('sport', x, z, heading, { parked: true });
+    v.x = x; v.z = z; v.heading = heading; v.mesh.position.set(x, 0, z); v.mesh.rotation.y = heading;
+    return v;
+  };
+  if (G.shot === 'chase') {
+    G.timeOfDay = 18.3; G.day = 1;
+    const v = placeCar(0, 60, Math.PI);
+    G.player.x = 0; G.player.z = 60; G.player.yaw = Math.PI; G.camYaw = Math.PI;
+    v.parked = false; G.car = v; v.speed = 22;
+    startMission(2); addWanted(3, '');
+    // Polisi di-spawn 40–50 m di belakang (bukan 18 m) supaya mereka
+    // terlihat mendekat di HUD saat capture, bukan sudah menempel.
+    spawnVehicle('police', 6, 100, Math.PI, { callsign: 'PELICAN-11' });
+    spawnVehicle('police', -6, 112, Math.PI, { callsign: 'GECKO-25' });
+  } else if (G.shot === 'drive') {
+    G.timeOfDay = 17.5;
+    const v = placeCar(-240, 0, Math.PI / 2);
+    G.player.x = -240; G.player.z = 0; G.player.yaw = Math.PI / 2; G.camYaw = Math.PI / 2;
+    v.parked = false; G.car = v; v.speed = 18;
+    startMission(1);
+  } else if (G.shot === 'street') {
+    G.timeOfDay = 12;
+    G.player.x = -250; G.player.z = 46; G.player.yaw = Math.PI / 2; G.camYaw = Math.PI / 2;
+    startMission(1);
+    G.dialog = { name: 'Marco', role: 'SMUGGLER · WHEELMAN', text: 'Marlin Ceviche, Malecón. Aku tunggu di meja luar — jangan telat.', until: 9999 };
+  } else if (G.shot === 'night') {
+    G.timeOfDay = 21;
+    const v = placeCar(120, 120, Math.PI);
+    G.player.x = 120; G.player.z = 120; G.player.yaw = Math.PI; G.camYaw = Math.PI;
+    v.parked = false; G.car = v; v.speed = 12;
+    startMission(4); addWanted(1, '');
+  } else if (G.shot === 'harbor') {
+    G.timeOfDay = 18.4;
+    G.player.x = -280; G.player.z = 0; G.player.yaw = -Math.PI / 2; G.camYaw = -Math.PI / 2;
+    startMission(7);
   }
+  G.objective = G.objective || 'Jelajahi Solara Bay';
 }
-export function applyShot(W) {
-  const params = new URLSearchParams(location.search);
-  const shot = params.get('shot') || 'chase';
-  const P = W.player;
-  const S = W.city.spots;
-  W.shotMode = true;
-  W.state = 'playing';
-  W.hud.setScreen('');
-  W.audio.ensure();
-  W.audio.setMusic(true, 0);
-  // Reset wanted + posisi pemain.
-  W.police.wanted = 0;
-  if (shot === 'chase') {
-    // Cover: sunset pink, downtown Spires, VELOZ dikejar 2 PCPD, wanted 4.
-    W.hour = 18.0;
-    W.missions.current = 7; W.missions.stage = 0; W.missions.timer = 107;
-    const car = createCar(W, 'veloz', 160, -40, Math.PI);
-    car.driver = 'player'; car.speed = 31;
-    P.car = car; P.group.visible = false;
-    P.x = car.x; P.z = car.z;
-    addWanted(W, 4, 'manhunt Golden Hour');
-    // Dua patroli tepat di belakang pemain.
-    W.police.cars.slice(0, 2).forEach((u, i) => {
-      u.car.x = 160 + (i === 0 ? -3 : 4); u.car.z = -40 + 16 + i * 7;
-      u.car.speed = 30;
-    });
-    W.shotHold = { speed: 31 };
-    W.hud.showDialog('Marco', 'SMUGGLER · WHEELMAN', "The boat sails in two minutes, Nico! Shake that chopper and get to the pier!", 30);
-  } else if (shot === 'drive') {
-    // Golden hour, jalan pantai Malecón, VELOZ + traffic + pejalan kaki.
-    W.hour = 17.8;
-    W.missions.current = 1; W.missions.stage = 0;
-    const car = createCar(W, 'veloz', MALECON_X(90), 90, Math.PI);
-    car.driver = 'player'; car.speed = 19;
-    P.car = car; P.group.visible = false;
-    P.x = car.x; P.z = car.z;
-    placeTrafficOnMalecon(W, 3);
-    W.shotHold = { speed: 19 };
-    W.hud.showDialog('Marco', 'SMUGGLER · WHEELMAN', 'Meet me at Marlin Ceviche, Nico. Malecón Celeste, ujung dermaga.', 30);
-  } else if (shot === 'street') {
-    // Siang, depan Marlin Ceviche: Nico jalan kaki, Marco di samping,
-    // prompt bicara, 4 pejalan kaki di sekitar.
-    W.hour = 11;
-    W.missions.current = 1; W.missions.stage = 0;
-    P.x = S.marlin.x; P.z = S.marlin.z + 15;
-    P.heading = 2.21; P.camYaw = P.heading;
-    P.group.position.set(P.x, 0, P.z);
-    W.combat.weapon = 1;
-    if (!W.missions.marco) {
-      const rng = mulberry32(W.seed + 21);
-      const g = makePersonModel(W.three, rng, { shirt: 0xffd25a, pants: 0x2a2e33 });
-      W.scene.add(g);
-      W.missions.marco = { group: g, x: S.marlin.x + 4, z: S.marlin.z + 12 };
-    }
-    W.missions.marco.group.position.set(S.marlin.x + 4, 0, S.marlin.z + 12);
-    W.missions.marco.x = S.marlin.x + 4; W.missions.marco.z = S.marlin.z + 12;
-    W.traffic.peds.slice(0, 4).forEach((p, i) => {
-      p.x = S.marlin.x - 8 + i * 5; p.z = S.marlin.z + 18 + (i % 2) * 4;
-      p.tx = p.x + 10; p.tz = p.z;
-      p.group.position.set(p.x, 0, p.z);
-    });
-    W.hud.showDialog('Marco', 'SMUGGLER · WHEELMAN', 'Nico. Dario menguasai dermaga — tapi Malecón ini masih milik kita.', 30);
-  } else if (shot === 'night') {
-    // Malam, Marina Bay: neon, lampu depan, wanted 1, dermaga + kincir ria.
-    W.hour = 23;
-    W.missions.current = 4; W.missions.stage = 0;
-    const car = createCar(W, 'veloz', -252, 108, Math.PI);
-    car.driver = 'player'; car.speed = 12;
-    P.car = car; P.group.visible = false;
-    P.x = car.x; P.z = car.z;
-    addWanted(W, 1, 'patroli malam');
-    W.shotHold = { speed: 12 };
-    W.hud.showDialog('Lupe', 'RADIO · CELESTE 98.1', 'Neon Nights di Malecón… kurir Dario lewat tengah malam ini.', 30);
-  }
-  W.shotFrames = 0;
-  W.shotName = shot;
+export function shotTick() {
+  if (!G.shot) return;
+  frames++;
+  if (frames === 12) window.__shotReady = true;
 }
-export function shotTick(W) {
-  if (!W.shotMode || window.__shotReady) return;
-  W.shotFrames++;
-  if (W.shotHold && W.player.car) W.player.car.speed = W.shotHold.speed;
-  if (W.shotFrames >= 4) window.__shotReady = true;
+export function exposeGame() {
+  window.__game = {
+    ready: G.ready, state: G.state, px: G.player.x, pz: G.player.z,
+    driving: !!G.car, car: G.car ? G.car.name : null,
+    speed: G.car ? Math.round(Math.abs(G.car.speed) * 3.6) : 0,
+    distToMissionCar: distToMissionCar(), wanted: G.wanted, cash: G.cash,
+    mission: G.missionIdx, step: G.missionStep, health: G.health,
+    taxi: G.taxi, race: G.race, fishing: G.fishing, photos: G.photos.length, fish: G.fish.length,
+    audio: window.__audio || null, yaw: G.player.yaw, camYaw: G.camYaw,
+    prompt: G.prompt, toast: G.toast,
+    calls: G.renderer ? G.renderer.info.render.calls : 0,
+    tris: G.renderer ? G.renderer.info.render.triangles : 0,
+  };
 }

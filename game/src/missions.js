@@ -1,361 +1,227 @@
-// 8 misi cerita SOLARA BAY + aktivitas sampingan (taksi, stunt jump,
-// sun coin, garasi, respray, toko senjata). Marker 3D + minimap menunjuk
-// tujuan; dialog Marco / Mara / Lupe di HUD.
-import { mulberry32, rr, pick, clamp } from './random.js';
-import { createCar } from './vehicles.js';
-import { makePersonModel } from './traffic.js';
-import { spawnGuards } from './combat.js';
-import { buyWeapon } from './combat.js';
-import { clearWantedAtRespray } from './police.js';
-import { MALECON_X } from './city.js';
-import { CFG } from './config.js';
-
+// 8 misi cerita + 4 aktivitas baru yang bisa dimainkan (taksi, balapan, mancing, foto) + misi sampingan.
+import { G, CFG } from './config.js';
+import { wasPressed } from './input.js';
+import { playJingle, playBlip } from './audio.js';
+import { spawnGuards, clearGuards, guardCount } from './combat.js';
+import { spawnVehicle } from './vehicles.js';
+import { addWanted } from './police.js';
+import { dist2 } from './random.js';
 export const MISSIONS = [
-  { name: 'First Gear', reward: 500, obj: 'Curi VELOZ COMET RS merah, antar ke bengkel Mara', sub: 'Tekan E di dekat mobil · hindari PCPD' },
-  { name: 'Meet Marco', reward: 300, obj: 'Temui Marco di Marlin Ceviche, Malecón Celeste', sub: 'Ikuti marker kuning di minimap' },
-  { name: 'Courier Run', reward: 800, obj: 'Antar 3 paket ke checkpoint dalam 4 menit', sub: 'Tabrakan = paket rusak' },
-  { name: 'Docks Job', reward: 1200, obj: 'Curi truk Hauler, lawan 4 penjaga, kabur bintang 2', sub: 'Tembak dengan klik kiri · R reload' },
-  { name: 'Neon Nights', reward: 1000, obj: 'Buntuti kurir Dario tanpa ketahuan, lalu kejar dia', sub: 'Malam hari · jaga jarak 8–35 m' },
-  { name: 'Street Race', reward: 1500, obj: 'Menangkan balapan jalanan di Malecón Celeste', sub: 'Lewati 4 checkpoint sebelum rival' },
-  { name: 'Beach Party', reward: 900, obj: 'Pesta pantai: jetski lewati 3 buoy, lalu mancing di dermaga', sub: 'E — naik jetski · E — mancing' },
-  { name: 'Golden Hour', reward: 5000, obj: 'Lolos manhunt sebelum kapal Marco berlayar', sub: 'Mereka melihatmu — putus line of sight!' },
+  { name: 'First Gear', ch: 'JOB 1/8', reward: 500, steps: [
+    { text: 'Curi VELOZ COMET RS pink di depanmu (E)', x: 0, z: 14, r: 4 },
+    { text: 'Antar mobil ke bengkel Mara (garasi hijau)', x: 120, z: 120, r: 8 } ] },
+  { name: 'Meet Marco', ch: 'JOB 2/8', reward: 800, steps: [
+    { text: 'Temui Marco di Marlin Ceviche, Malecón', x: -244, z: 44, r: 7 } ] },
+  { name: 'Courier Run', ch: 'JOB 3/8', reward: 1200, timer: 240, steps: [
+    { text: 'Antar paket 1/3 ke Plaza Spires', x: 60, z: -180, r: 8 },
+    { text: 'Antar paket 2/3 ke Docks', x: 220, z: -180, r: 8 },
+    { text: 'Antar paket 3/3 ke Calle Verde', x: -140, z: 240, r: 8 } ] },
+  { name: 'Docks Job', ch: 'JOB 4/8', reward: 2000, steps: [
+    { text: 'Curi truk Hauler di Docks (E)', x: 220, z: -200, r: 6 },
+    { text: 'Hajar 4 penjaga Docks, lalu kabur ke garasi', x: 120, z: 120, r: 9 } ] },
+  { name: 'Neon Nights', ch: 'JOB 5/8', reward: 1500, timer: 180, steps: [
+    { text: 'Buntuti kurir Dario di Old Solara (jangan dekat)', x: -140, z: 60, r: 10 },
+    { text: 'Kejar kurir yang kabur ke Marina', x: -140, z: -180, r: 8 } ] },
+  { name: 'Street Race', ch: 'JOB 6/8', reward: 1800, timer: 150, steps: [
+    { text: 'Menang balapan jalanan: lewati 3 checkpoint', x: 120, z: 6, r: 9 },
+    { text: 'Checkpoint 2 — ujung Malecón', x: -240, z: -120, r: 9 },
+    { text: 'Finish — garis start', x: 120, z: 6, r: 9 } ] },
+  { name: 'Beach Party', ch: 'JOB 7/8', reward: 1000, steps: [
+    { text: 'Datang ke pesta pantai di dermaga', x: -284, z: 0, r: 8 },
+    { text: 'Foto mercusuar untuk Lupe (F di titik ungu)', x: -262, z: 150, r: 7 } ] },
+  { name: 'Golden Hour', ch: 'JOB 8/8', reward: 5000, timer: 150, steps: [
+    { text: 'Lolos dari kejaran PCPD sebelum kapal Marco berlayar', x: -120, z: 0, r: 10 },
+    { text: 'Sampai ke kapal di ujung dermaga!', x: -292, z: 0, r: 7 } ] },
 ];
 const DIALOGS = [
-  ['Mara', 'BENGKEL · MARA VOSS', 'Nico! Mobil merah itu — VELOZ COMET RS. Ambil, antar ke bengkelku. Jangan sampai PCPD lihat.'],
-  ['Marco', 'SMUGGLER · WHEELMAN', 'Nico, akhirnya. Dario menguasai dermaga. Bantu aku, dan utangmu lunas sebelum matahari tenggelam.'],
-  ['Kip', 'HACKER · KIP', 'Tiga paket, empat menit. Rute sudah di minimap. Jangan tabrak apa pun — paketnya rapuh.'],
-  ['Marco', 'SMUGGLER · WHEELMAN', 'Truk Hauler di Docks penuh barang Dario. Empat penjaga. Ambil truknya, kabur ke garasi Mara.'],
-  ['Lupe', 'RADIO · CELESTE 98.1', 'Malam ini kurir Dario lewat Malecón. Buntuti dari jauh, jangan sampai dia sadar — lalu kejar.'],
-  ['Marco', 'SMUGGLER · WHEELMAN', 'Balapan malam ini di Malecón. Menang, dan seluruh kota tahu nama Nico. Kalah… jangan kalah.'],
-  ['Lupe', 'RADIO · CELESTE 98.1', 'Pesta pantai di Marina Bay! Jetski dulu, tiga buoy — lalu mancing di ujung dermaga. Santai, Nico.'],
-  ['Marco', 'SMUGGLER · WHEELMAN', 'Kapal berlayar dua menit lagi, Nico! Lepas dari manhunt itu dan kejar dermaga!'],
+  ['Marco', 'SMUGGLER · WHEELMAN', 'Nico! Mobil pink itu kuncinya. Bawa ke bengkel Mara, cepat.'],
+  ['Marco', 'SMUGGLER · WHEELMAN', 'Marlin Ceviche, Malecón. Aku tunggu di meja luar — jangan telat.'],
+  ['Lupe', 'DISPATCHER', 'Tiga paket, empat menit. Jangan tabrak apa pun, Nico.'],
+  ['Marco', 'SMUGGLER · WHEELMAN', 'Truk Hauler di Docks itu milik Dario. Ambil. Penjaganya galak.'],
+  ['Kip', 'HACKER', 'Kurir Dario lewat Old Solara jam segini. Buntuti dari jauh.'],
+  ['Marco', 'SMUGGLER · WHEELMAN', 'Balapan jalanan malam ini — menangkan, dan namamu naik.'],
+  ['Lupe', 'DISPATCHER', 'Pesta pantai di dermaga! Foto mercusuarnya buat kenang-kenangan.'],
+  ['Marco', 'SMUGGLER · WHEELMAN', 'Kapal berlayar dua menit lagi, Nico! Lepas dari helikopter itu dan ke dermaga!'],
 ];
-export function createMissions(W) {
-  const beaconMat = new W.three.MeshBasicMaterial({ color: 0xffd25a, transparent: true, opacity: 0.5 });
-  const beacon = new W.three.Mesh(new W.three.CylinderGeometry(0.5, 2.2, 90, 12, 1, true), beaconMat);
-  beacon.visible = false;
-  W.scene.add(beacon);
-  const ring = new W.three.Mesh(new W.three.TorusGeometry(2.4, 0.22, 8, 24),
-    new W.three.MeshBasicMaterial({ color: 0xffd25a }));
-  ring.rotation.x = Math.PI / 2; ring.visible = false;
-  W.scene.add(ring);
-  const M = {
-    current: 0, stage: 0, timer: 0, flags: {}, marker: null,
-    nearInteract: null, onInteract: null, beacon, ring,
-    marco: null, courier: null, rivals: [], raceCp: 0, tailT: 0,
-    taxiFare: null, taxiCd: 0, resprayT: 0, prevDriving: false,
-    stuntCd: {}, fishT: 0,
-  };
-  W.missions = M;
-  return M;
+export function mission() { return MISSIONS[Math.min(G.missionIdx, MISSIONS.length - 1)]; }
+export function missionStep() { const m = mission(); return m.steps[Math.min(G.missionStep, m.steps.length - 1)]; }
+// Titik acak yang selalu di jalan (satu sumbu menempel garis jalan) —
+// supaya target taksi/paket selalu bisa dicapai mobil, tidak di dalam gedung.
+function roadPoint() {
+  const lines = [-240, -120, 0, 120, 240];
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  if (Math.random() < 0.5) return { x: line + (Math.random() * 6 - 3), z: Math.random() * 520 - 260 };
+  return { x: Math.random() * 520 - 260, z: line + (Math.random() * 6 - 3) };
 }
-function setMarker(W, x, z) {
-  const M = W.missions;
-  M.marker = { x, z };
-  M.beacon.position.set(x, 45, z);
-  M.beacon.visible = true;
-  M.ring.position.set(x, 0.4, z);
-  M.ring.visible = true;
+export function startMission(i) {
+  G.missionIdx = i; G.missionStep = 0;
+  const m = MISSIONS[i];
+  G.missionTimer = m.timer || 0;
+  const d = DIALOGS[i];
+  G.dialog = { name: d[0], role: d[1], text: d[2], until: G.time + 6 };
+  G.objective = m.steps[0].text;
+  if (i === 3) spawnGuards(220, -200, 4);
+  if (i === 4) G.timeOfDay = 20.5;
+  if (i === 7) { G.timeOfDay = 18.4; addWanted(4, 'PCPD mengepungmu — lolos sebelum kapal berlayar!'); }
 }
-function clearMarker(W) {
-  W.missions.marker = null;
-  W.missions.beacon.visible = false;
-  W.missions.ring.visible = false;
+export function completeMission() {
+  const m = mission();
+  G.cash += m.reward; G.missionsDone++; G.respect = Math.min(5, 1 + G.missionsDone);
+  playJingle();
+  G.toast = `MISI SELESAI: ${m.name}  +$${m.reward}`; G.toastT = 4;
+  clearGuards();
+  if (G.missionIdx < MISSIONS.length - 1) startMission(G.missionIdx + 1);
+  else { G.dialog = { name: 'Marco', role: 'SMUGGLER · WHEELMAN', text: 'Utang lunas, Nico. Solara Bay milik kita sekarang.', until: G.time + 8 }; G.objective = 'Semua misi selesai — bebas keliling Solara Bay!'; }
+  saveGame();
 }
-function say(W, i) {
-  const [name, role, text] = DIALOGS[i];
-  W.hud.showDialog(name, role, text, 7);
-}
-export function startMission(W, i) {
-  const M = W.missions;
-  M.current = i; M.stage = 0; M.timer = 0; M.flags = {};
-  M.taxiFare = null;
-  say(W, i);
-  const S = W.city.spots;
-  if (i === 0) setMarker(W, 17, 84);
-  if (i === 1) {
-    if (!M.marco) {
-      const rng = mulberry32(W.seed + 21);
-      const g = makePersonModel(W.three, rng, { shirt: 0xffd25a, pants: 0x2a2e33 });
-      g.position.set(S.marlin.x + 4, 0, S.marlin.z + 12);
-      W.scene.add(g);
-      M.marco = { group: g, x: S.marlin.x + 4, z: S.marlin.z + 12 };
-    }
-    setMarker(W, S.marlin.x, S.marlin.z + 12);
+export function updateMissions(dt) {
+  const m = mission();
+  if (G.missionIdx >= MISSIONS.length) return;
+  if (m.timer && G.missionTimer > 0) {
+    G.missionTimer -= dt;
+    if (G.missionTimer <= 0) { G.missionTimer = m.timer; G.missionStep = 0; G.toast = 'Waktu habis — misi diulang dari awal'; G.toastT = 3; G.objective = m.steps[0].text; return; }
   }
-  if (i === 2) { M.timer = 240; setMarker(W, 160, -160); }
-  if (i === 3) setMarker(W, S.docks.x, S.docks.z);
-  if (i === 4) { W.hour = 21; setMarker(W, -80, -80); }
-  if (i === 5) setMarker(W, S.raceStart.x, S.raceStart.z);
-  if (i === 6) setMarker(W, S.beach.x, S.beach.z);
-  if (i === 7) {
-    W.hour = 18.5;
-    M.timer = 107;
-    W.police.addWanted(W, 4, 'manhunt Golden Hour');
-    setMarker(W, S.pier.x, S.pier.z);
-  }
-  W.hud.toast(`JOB ${i + 1}/8 — ${MISSIONS[i].name}`);
-}
-export function completeMission(W, reward) {
-  const M = W.missions;
-  const m = MISSIONS[M.current];
-  W.cash += reward || m.reward;
-  W.audio.jingle();
-  W.hud.toast(`JOB SELESAI: ${m.name}  +$${reward || m.reward}`);
-  clearMarker(W);
-  M.nearInteract = null; M.onInteract = null;
-  W.saveGame();
-  if (M.current >= MISSIONS.length - 1) {
-    W.endGame(`Utang lunas. Dario kalah. Kapal Marco berlayar saat matahari tenggelam — Nico bebas. RESPECT: SHOT CALLER.`);
+  const s = missionStep();
+  const px = G.player.x, pz = G.player.z;
+  // Syarat khusus misi 4: penjaga harus habis dulu sebelum checkpoint akhir.
+  if (G.missionIdx === 3 && G.missionStep === 1 && guardCount() > 0) {
+    G.objective = `Hajar penjaga Docks yang tersisa: ${guardCount()}`;
     return;
   }
-  startMission(W, M.current + 1);
+  if (dist2(px, pz, s.x, s.z) < s.r * s.r) {
+    if (G.missionStep < m.steps.length - 1) {
+      G.missionStep++;
+      G.objective = m.steps[G.missionStep].text;
+      playBlip(990);
+    } else completeMission();
+  }
+  updateActivities(dt);
 }
-export function failMission(W, reason) {
-  W.audio.fail();
-  W.showDead('MISI GAGAL', `${reason} — tekan RETRY untuk coba lagi.`);
-}
-function dist2(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
-export function updateMissions(W, dt) {
-  const M = W.missions;
-  const P = W.player;
-  const px = P.car ? P.car.x : P.x;
-  const pz = P.car ? P.car.z : P.z;
-  const S = W.city.spots;
-  // Beacon berputar.
-  if (M.marker) {
-    M.beacon.rotation.y += dt;
-    M.ring.rotation.z += dt;
-    M.ring.position.y = 0.4 + Math.sin(W.elapsed * 2) * 0.2;
-  }
-  // --- Sun coin ---
-  for (const c of W.city.sunCoins) {
-    if (c.taken) continue;
-    c.mesh.rotation.y += dt * 2;
-    if (dist2(px, pz, c.x, c.z) < 1.9) {
-      c.taken = true; c.mesh.visible = false;
-      W.cash += CFG.sunCoinValue;
-      W.stats.coins++;
-      W.audio.coin();
-      W.hud.toast(`Sun coin +$${CFG.sunCoinValue} (${W.stats.coins}/30)`);
+// ---------- AKTIVITAS BARU ----------
+export function updateActivities(dt) {
+  const px = G.player.x, pz = G.player.z;
+  const city = G.city;
+  // (a) TAKSI — antar penumpang, timer + bayaran.
+  const t = G.taxi;
+  if (!t.active && dist2(px, pz, city.taxiStand.x, city.taxiStand.z) < 64) {
+    G.prompt = 'F — Jadi supir taksi (antar penumpang, $40)';
+    if (wasPressed('KeyF') || G.touch.actPressed) {
+      G.touch.actPressed = false; t.active = true; t.phase = 'pickup';
+      const rp = roadPoint(); t.tx = rp.x; t.tz = rp.z;
+      t.t = 90; G.toast = 'Penumpang menunggu — jemput dia (marker kuning)!'; G.toastT = 3; playBlip(700);
+    }
+  } else if (t.active) {
+    t.t -= dt;
+    if (t.t <= 0) { t.active = false; G.toast = 'Penumpang batal — terlalu lama'; G.toastT = 2; }
+    else if (t.phase === 'pickup' && dist2(px, pz, t.tx, t.tz) < 81) {
+      t.phase = 'drop'; const rp = roadPoint(); t.tx = rp.x; t.tz = rp.z; t.t = 100;
+      G.toast = 'Penumpang naik! Antar ke tujuan (marker kuning)'; G.toastT = 3;
+    } else if (t.phase === 'drop' && dist2(px, pz, t.tx, t.tz) < 81) {
+      t.active = false; t.done++; G.cash += CFG.taxiFare;
+      G.toast = `Taksi selesai! +$${CFG.taxiFare}`; G.toastT = 3; playJingle();
     }
   }
-  // --- Garasi: keluar mobil di dekat garasi = simpan ---
-  if (M.prevDriving && !P.car && dist2(P.x, P.z, S.garage.x, S.garage.z) < 12) {
-    if (W.garage.length < 3) {
-      W.garage.push('mobil curian');
-      W.hud.toast('Mobil disimpan di garasi Mara.');
-      W.saveGame();
+  // (b) BALAPAN JALANAN DADAKAN — lawan 2 AI di rute kota.
+  const r = G.race;
+  if (!r.active && dist2(px, pz, city.raceStart.x, city.raceStart.z) < 64) {
+    G.prompt = 'F — Balapan jalanan dadakan (hadiah $120)';
+    if (wasPressed('KeyF') || G.touch.actPressed) {
+      G.touch.actPressed = false; r.active = true; r.step = 0; r.t = 180; r.rivals = [];
+      for (let i = 0; i < 2; i++) {
+        const rv = spawnVehicle(i ? 'sedan' : 'sport', city.raceStart.x + 4 + i * 5, city.raceStart.z + 6, Math.PI, { traffic: true });
+        rv.raceTarget = 0; rv.raceSpeed = 20 + i * 3; r.rivals.push(rv);
+      }
+      G.toast = 'BALAPAN! Lewati 3 checkpoint sebelum rival!'; G.toastT = 3; playBlip(1200);
+    }
+  } else if (r.active) {
+    r.t -= dt;
+    const route = [{ x: 120, z: 6 }, { x: -240, z: -120 }, { x: 120, z: 6 }];
+    const cp = route[Math.min(r.step, 2)];
+    if (dist2(px, pz, cp.x, cp.z) < 81) {
+      r.step++;
+      if (r.step >= 3) {
+        r.active = false; r.done++;
+        const win = r.rivals.every((rv) => (rv.raceTarget || 0) < 3);
+        if (win) { G.cash += CFG.racePrize; G.toast = `MENANG BALAPAN! +$${CFG.racePrize}`; playJingle(); }
+        else G.toast = 'Kalah balapan — coba lagi di garis start';
+        G.toastT = 3;
+        for (const rv of r.rivals) { G.scene.remove(rv.mesh); G.vehicles.splice(G.vehicles.indexOf(rv), 1); }
+        r.rivals = [];
+      } else playBlip(990);
+    }
+    for (const rv of r.rivals) {
+      const target = route[Math.min(rv.raceTarget || 0, 2)];
+      const dx = target.x - rv.x, dz = target.z - rv.z, d = Math.hypot(dx, dz) || 1;
+      rv.heading = Math.atan2(dx, dz);
+      rv.x += (dx / d) * rv.raceSpeed * dt; rv.z += (dz / d) * rv.raceSpeed * dt;
+      rv.mesh.position.set(rv.x, 0, rv.z); rv.mesh.rotation.y = rv.heading;
+      if (d < 9) rv.raceTarget = (rv.raceTarget || 0) + 1;
+    }
+    if (r.t <= 0) { r.active = false; G.toast = 'Balapan berakhir — waktu habis'; G.toastT = 2; for (const rv of r.rivals) { G.scene.remove(rv.mesh); G.vehicles.splice(G.vehicles.indexOf(rv), 1); } r.rivals = []; }
+  }
+  // (c) MANCING LEBIH DALAM — timing bar, 3 hit, koleksi ikan.
+  const f = G.fishing;
+  const spot = city.fishingSpots[0];
+  if (!f.active && dist2(px, pz, spot.x, spot.z) < 49) {
+    G.prompt = 'F — Mancing di dermaga (tekan F saat bar di zona hijau)';
+    if (wasPressed('KeyF') || G.touch.actPressed) {
+      G.touch.actPressed = false; f.active = true; f.bar = 0; f.dir = 1; f.hits = 0;
+      G.toast = 'Mancing! Tekan F saat bar di zona hijau (3x)'; G.toastT = 3;
+    }
+  } else if (f.active) {
+    // Bar bergerak pelan (0,8/dtk) + zona hijau lebar (30–80%) supaya
+    // timing bisa dilakukan manusia — dan terverifikasi di playtest.
+    f.bar += f.dir * dt * 0.8;
+    if (f.bar > 1) { f.bar = 1; f.dir = -1; }
+    if (f.bar < 0) { f.bar = 0; f.dir = 1; }
+    if (wasPressed('KeyF') || G.touch.actPressed) {
+      G.touch.actPressed = false;
+      if (f.bar > 0.30 && f.bar < 0.80) {
+        f.hits++; playBlip(1100);
+        if (f.hits >= f.need) {
+          const fish = ['Ikan Kerapu', 'Ikan Tuna Kecil', 'Ikan Marlin Muda', 'Ikan Kakap'][Math.floor(Math.random() * 4)];
+          G.fish.push(fish); G.fishCaught[fish] = (G.fishCaught[fish] || 0) + 1;
+          G.cash += CFG.fishPrice; f.active = false;
+          G.toast = `Dapat ${fish}! +$${CFG.fishPrice} (koleksi: ${G.fish.length})`; G.toastT = 3; playJingle();
+        } else G.toast = `Kena! ${f.hits}/${f.need}`; G.toastT = 1;
+      } else { f.active = false; G.toast = 'Ikan lepas! Coba mancing lagi'; G.toastT = 2; }
     }
   }
-  M.prevDriving = !!P.car;
-  // --- Respray otomatis: pelan di dekat Spray & Shine ---
-  if (P.car && dist2(px, pz, S.spray.x, S.spray.z) < 7 && Math.abs(P.car.speed) < 2 && W.police.wanted > 0) {
-    M.resprayT += dt;
-    if (M.resprayT > 2) { M.resprayT = 0; clearWantedAtRespray(W); }
-  } else M.resprayT = 0;
-  // --- Stunt jump: lewati ramp kencang ---
-  for (const [rx, rz] of [[120, 40], [-40, -120], [200, 120]]) {
-    const key = `${rx},${rz}`;
-    M.stuntCd[key] = (M.stuntCd[key] || 0) - dt;
-    if (P.car && Math.abs(P.car.speed) > 18 && dist2(px, pz, rx, rz) < 3.5 && M.stuntCd[key] <= 0) {
-      M.stuntCd[key] = 60;
-      W.cash += CFG.stuntBonus;
-      W.hud.toast(`STUNT JUMP! +$${CFG.stuntBonus}`);
-      W.audio.jingle();
+  // (d) SPOT FOTO — 6 titik tersembunyi di kota.
+  for (let i = 0; i < city.photoSpots.length; i++) {
+    const sp = city.photoSpots[i];
+    if (!G.photos.includes(i) && dist2(px, pz, sp.x, sp.z) < 49) {
+      G.prompt = `F — Foto: ${sp.name} (${G.photos.length}/6)`;
+      if (wasPressed('KeyF') || G.touch.actPressed) {
+        G.touch.actPressed = false; G.photos.push(i);
+        G.toast = `Foto ${sp.name} diambil! (${G.photos.length}/6)`; G.toastT = 2.5; playBlip(1300);
+        if (G.photos.length === 6) { G.cash += CFG.photoBonus; G.toast = `SEMUA FOTO LENGKAP! +$${CFG.photoBonus}`; playJingle(); }
+      }
     }
   }
-  // --- Taksi: bawa CABRO, penumpang muncul otomatis ---
-  M.taxiCd -= dt;
-  if (P.car && P.car.kind === 'cabro' && !M.taxiFare && M.taxiCd <= 0) {
-    const from = pick(mulberry32((W.elapsed | 0) + 3), [[0, 0], [-160, 80], [80, -160], [-238, 120]]);
-    const to = pick(mulberry32((W.elapsed | 0) + 9), [[120, 160], [-120, -120], [200, -80], [56, 96]]);
-    M.taxiFare = { fx: from[0], fz: from[1], tx: to[0], tz: to[1], picked: false };
-    W.hud.toast('Penumpang taksi menunggu — ikuti marker hijau.');
-  }
-  if (M.taxiFare) {
-    const f = M.taxiFare;
-    if (!f.picked && dist2(px, pz, f.fx, f.fz) < 6) { f.picked = true; W.hud.toast('Penumpang naik! Antar ke tujuan.'); }
-    else if (f.picked && dist2(px, pz, f.tx, f.tz) < 6) {
-      W.cash += CFG.taxiFare; M.taxiFare = null; M.taxiCd = 20;
-      W.hud.toast(`Tarif taksi +$${CFG.taxiFare}`);
-      W.audio.coin();
-    }
-  }
-  // --- Interaksi toko senjata ---
-  M.nearInteract = null; M.onInteract = null;
-  if (!P.car && dist2(P.x, P.z, S.guns.x, S.guns.z) < 7) {
-    const next = !W.combat.owned[2] ? 2 : !W.combat.owned[3] ? 3 : -1;
-    if (next >= 0) {
-      M.nearInteract = `E — Beli ${CFG.weapons[next].name} $${CFG.weapons[next].price}`;
-      M.onInteract = () => buyWeapon(W, next);
-    } else M.nearInteract = "Cal's Guns — semua senjata dimiliki";
-  }
-  // --- Logika misi aktif ---
-  const m = M.current;
-  if (m === 0) {
-    if (M.stage === 0 && P.car === W.traffic.missionCar) { M.stage = 1; setMarker(W, S.garage.x, S.garage.z); W.hud.toast('Bagus! Sekarang ke bengkel Mara.'); }
-    else if (M.stage === 1 && P.car && dist2(px, pz, S.garage.x, S.garage.z) < 9) completeMission(W);
-  } else if (m === 1) {
-    // Titik temu = depan restoran (di luar footprint gedung). Interaksi
-    // tetap tersedia selama stage 1 (bukan satu frame saja).
-    const mx = S.marlin.x, mz = S.marlin.z + 12;
-    if (M.stage === 0 && dist2(P.x, P.z, mx, mz) < 7) M.stage = 1;
-    if (M.stage === 1) {
-      M.nearInteract = 'E — Bicara dengan Marco';
-      M.onInteract = () => {
-        W.hud.showDialog('Marco', 'SMUGGLER · WHEELMAN', 'Dario pikir dia bisa beli seluruh Malecón. Kita buktikan dia salah. Kerja bagus, Nico.', 6);
-        completeMission(W);
-      };
-    }
-  } else if (m === 2) {
-    M.timer -= dt;
-    const cps = [[160, -160], [-160, 160], [80, 240]];
-    if (M.timer <= 0) { failMission(W, 'Waktu habis — paket terlambat'); return; }
-    if (M.stage < 3 && dist2(px, pz, cps[M.stage][0], cps[M.stage][1]) < 7) {
-      M.stage++;
-      W.audio.coin();
-      if (M.stage < 3) setMarker(W, cps[M.stage][0], cps[M.stage][1]);
-      else completeMission(W);
-    }
-  } else if (m === 3) {
-    if (M.stage === 0 && dist2(px, pz, S.docks.x, S.docks.z) < 26) {
-      M.stage = 1;
-      spawnGuards(W, S.docks.x, S.docks.z, 4);
-      W.hud.toast('4 penjaga Dario! Lumpuhkan mereka.');
-    } else if (M.stage === 1 && W.combat.enemies.filter((e) => !e.dead).length === 0) {
-      M.stage = 2;
-      if (!M.hauler) M.hauler = createCar(W, 'hauler', S.docks.x + 10, S.docks.z + 6, 0);
-      setMarker(W, M.hauler.x, M.hauler.z);
-      W.hud.toast('Jalan bersih! Curi truk Hauler.');
-    } else if (M.stage === 2 && P.car === M.hauler) {
-      M.stage = 3;
-      W.police.addWanted(W, 2, 'truk Docks dicuri');
-      setMarker(W, S.garage.x, S.garage.z);
-    } else if (M.stage === 3 && P.car === M.hauler && dist2(px, pz, S.garage.x, S.garage.z) < 9) completeMission(W);
-  } else if (m === 4) {
-    if (!M.courier) {
-      M.courier = createCar(W, 'cometa', -80, -80, 0, 0x2a2e33);
-      M.courier.driver = 'courier';
-      M.courierNode = 0;
-    }
-    const c = M.courier;
-    if (M.stage === 0) {
-      // Kurir jalan pelan di graf; pemain buntuti 8–35 m selama 25 dtk.
-      const d = dist2(px, pz, c.x, c.z);
-      if (d < 6) { M.spotT = (M.spotT || 0) + dt; if (M.spotT > 2) { failMission(W, 'Ketahuan! Kurir kabur'); return; } }
-      else M.spotT = 0;
-      if (d > 8 && d < 35) { M.tailT += dt; if (M.tailT >= 25) { M.stage = 1; W.hud.toast('Dia kabur! KEJAR!'); W.police.addWanted(W, 3, 'kejar-kejaran Neon Nights'); } }
-      else M.tailT = Math.max(0, M.tailT - dt * 0.5);
-      moveCourier(W, c, 9, dt);
-      setMarker(W, c.x, c.z);
-    } else if (M.stage === 1) {
-      moveCourier(W, c, 24, dt);
-      if (dist2(px, pz, c.x, c.z) < 9) completeMission(W);
-    }
-  } else if (m === 5) {
-    if (M.stage === 0 && P.car && dist2(px, pz, S.raceStart.x, S.raceStart.z) < 10) {
-      M.stage = 1; M.raceCp = 0;
-      M.rivals = [];
-      const kinds = ['cometa', 'pip', 'veloz'];
-      kinds.forEach((k, i) => {
-        const rc = createCar(W, k, S.raceStart.x + 4 + i * 5, S.raceStart.z - 6 - i * 3, Math.PI);
-        rc.driver = 'rival';
-        M.rivals.push({ car: rc, z: S.raceStart.z, speed: 22 + i * 1.5 });
-      });
-      W.hud.toast('BALAPAN! Lewati 4 checkpoint di Malecón!');
-    } else if (M.stage === 1) {
-      const cps = [0, 80, 160, 240];
-      const cz = cps[M.raceCp];
-      setMarker(W, MALECON_X(cz), cz);
-      if (dist2(px, pz, MALECON_X(cz), cz) < 11) {
-        M.raceCp++;
-        W.audio.coin();
-        if (M.raceCp >= 4) { completeMission(W); return; }
-      }
-      for (const r of M.rivals) {
-        r.z += r.speed * dt;
-        r.car.x = MALECON_X(r.z); r.car.z = r.z;
-        r.car.heading = Math.atan2(MALECON_X(r.z + 5) - MALECON_X(r.z - 5), 10);
-        r.car.group.position.set(r.car.x, 0, r.car.z);
-        r.car.group.rotation.y = r.car.heading;
-        if (r.z >= 240) { failMission(W, 'Rival finis duluan'); return; }
-      }
-    }
-  } else if (m === 6) {
-    if (M.stage === 0 && dist2(P.x, P.z, S.beach.x, S.beach.z) < 9) {
-      M.stage = 1;
-      setMarker(W, S.jetski.x, S.jetski.z);
-      W.hud.toast('Pesta pantai! Naik jetski di air.');
-    } else if (M.stage === 1) {
-      if (!M.jetskiCar && dist2(P.x, P.z, S.jetski.x, S.jetski.z) < 8) {
-        M.nearInteract = 'E — Naik jetski';
-        M.onInteract = () => {
-          M.jetskiCar = createCar(W, 'pip', S.jetski.x, S.jetski.z, 0, 0xffd25a);
-          M.jetskiCar.driver = 'player';
-          P.car = M.jetskiCar; P.group.visible = false;
-          W.audio.engine(true, 0);
-          W.hud.toast('Jetski! Lewati 3 buoy kuning.');
-        };
-      }
-      if (M.jetskiCar && P.car === M.jetskiCar) {
-        const buoys = [[-318, 80], [-318, 120], [-318, 160]];
-        const b = buoys[M.buoy || 0];
-        if (b) {
-          setMarker(W, b[0], b[1]);
-          if (dist2(px, pz, b[0], b[1]) < 7) { M.buoy = (M.buoy || 0) + 1; W.audio.coin(); }
-        } else {
-          M.stage = 2;
-          setMarker(W, S.fishing.x, S.fishing.z);
-          W.hud.toast('Buoy selesai! Mancing di ujung dermaga.');
-        }
-      }
-    } else if (M.stage === 2) {
-      if (!P.car && dist2(P.x, P.z, S.fishing.x, S.fishing.z) < 6) {
-        M.nearInteract = 'E — Mancing';
-        M.onInteract = () => { M.fishing = true; W.hud.toast('Memancing… tunggu gigitan.'); };
-      }
-      if (M.fishing) {
-        M.fishT += dt;
-        if (M.fishT > 5) { M.fishing = false; M.fishT = 0; W.audio.coin(); completeMission(W); }
-      }
-    }
-  } else if (m === 7) {
-    M.timer -= dt;
-    if (M.timer <= 0) { failMission(W, 'Kapal Marco sudah berlayar'); return; }
-    if (M.stage === 0) {
-      if (W.police.wanted === 0) {
-        M.stage = 1;
-        setMarker(W, S.pier.x, S.pier.z);
-        W.hud.toast('Manhunt lepas! KEJAR KAPAL di dermaga!');
-      }
-    } else if (M.stage === 1 && dist2(P.x, P.z, S.pier.x, S.pier.z) < 9) completeMission(W);
+  // (e) MISI SAMPINGAN PENDEK — antar paket kilat (muncul berkala).
+  const s = G.sideJob;
+  if (!s.active && G.time % 90 < dt && Math.random() < 0.5) {
+    const rp = roadPoint(); s.active = true; s.tx = rp.x; s.tz = rp.z; s.t = 75;
+    G.toast = 'Misi sampingan: antar paket kilat ke marker hijau (75 detik)!'; G.toastT = 3;
+  } else if (s.active) {
+    s.t -= dt;
+    if (dist2(px, pz, s.tx, s.tz) < 81) { s.active = false; s.done++; G.cash += 60; G.toast = 'Paket kilat sampai! +$60'; G.toastT = 3; playJingle(); }
+    else if (s.t <= 0) { s.active = false; G.toast = 'Paket kilat gagal — waktu habis'; G.toastT = 2; }
   }
 }
-function moveCourier(W, c, speed, dt) {
-  // Kurir ikut graf jalan: pilih node berikut yang menjauhi pemain.
-  const nodes = W.city.nodes;
-  if (c._t === undefined || c._t >= 1) {
-    const from = nearestNodeIdx(W, c.x, c.z);
-    const links = nodes[from].links;
-    c._from = from;
-    c._to = links.length ? links[Math.floor(Math.random() * links.length)] : from;
-    c._t = 0;
-  }
-  const a = nodes[c._from], b = nodes[c._to];
-  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-  c._t += (speed * dt) / len;
-  c.x = a.x + (b.x - a.x) * Math.min(1, c._t);
-  c.z = a.z + (b.z - a.z) * Math.min(1, c._t);
-  c.heading = Math.atan2(b.x - a.x, b.z - a.z);
-  c.group.position.set(c.x, 0, c.z);
-  c.group.rotation.y = c.heading;
+export function saveGame() {
+  try {
+    localStorage.setItem('solarabay-save', JSON.stringify({ cash: G.cash, missionIdx: G.missionIdx, missionsDone: G.missionsDone, photos: G.photos, fish: G.fish, stats: G.stats }));
+  } catch (e) { /* abaikan */ }
 }
-function nearestNodeIdx(W, x, z) {
-  let best = 0, bd = Infinity;
-  W.city.nodes.forEach((n, i) => {
-    const d = (n.x - x) ** 2 + (n.z - z) ** 2;
-    if (d < bd) { bd = d; best = i; }
-  });
-  return best;
+export function loadGame() {
+  try {
+    const s = JSON.parse(localStorage.getItem('solarabay-save') || 'null');
+    if (!s) return false;
+    G.cash = s.cash; G.missionIdx = s.missionIdx; G.missionsDone = s.missionsDone || 0;
+    G.photos = s.photos || []; G.fish = s.fish || []; G.stats = s.stats || G.stats;
+    G.respect = Math.min(5, 1 + G.missionsDone);
+    return true;
+  } catch (e) { return false; }
 }

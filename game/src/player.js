@@ -1,171 +1,105 @@
-// Nico jalan kaki + kamera third-person (chase cam). Mouse / geser jari
-// memutar kamera, C / tombol KAM ganti jarak, E masuk-keluar mobil.
-import { mulberry32 } from './random.js';
-import { makePersonModel } from './traffic.js';
-import { collideBuildings } from './city.js';
-import { updatePlayerCar } from './vehicles.js';
-import { clamp, wrapAngle } from './random.js';
-import { CFG } from './config.js';
-
-export function createPlayer(W) {
-  const rng = mulberry32(W.seed + 5);
-  const group = makePersonModel(W.three, rng, { skin: 0xe8b88a, shirt: 0x2a7bd2, pants: 0x2a2e33, noHat: false });
-  group.position.set(CFG.spawn.x, 0, CFG.spawn.z);
-  W.scene.add(group);
-  // Pistol di tangan kanan (terlihat bila senjata > FISTS).
-  const gun = new W.three.Mesh(new W.three.BoxGeometry(0.09, 0.16, 0.42),
-    new W.three.MeshLambertMaterial({ color: 0x1a1d22 }));
-  gun.position.set(0.34, 0.85, 0.28);
-  gun.visible = false;
-  group.add(gun);
-  const P = {
-    group, gun, x: CFG.spawn.x, z: CFG.spawn.z, y: 0, vy: 0,
-    heading: CFG.spawn.heading, camYaw: CFG.spawn.heading, camPitch: 0.32,
-    camDist: 7, camMode: 0, speed: 0, phase: 0,
-    car: null, onGround: true, walkTarget: null,
-  };
-  W.player = P;
-  return P;
+// Nico jalan kaki + kamera third-person + masuk/keluar mobil.
+import * as THREE from 'three';
+import { G, CFG } from './config.js';
+import { clamp } from './random.js';
+import { axis, wasPressed } from './input.js';
+import { nearestVehicle, enterCar, exitCar, updatePlayerCar } from './vehicles.js';
+import { playBlip } from './audio.js';
+let armL, armR, legL, legR, body;
+export function buildPlayer() {
+  const g = new THREE.Group();
+  const shirt = new THREE.MeshLambertMaterial({ color: 0xff5da2 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3e50 });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xe0ac69 });
+  body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.85, 0.36), shirt); body.position.y = 1.05; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), skin); head.position.y = 1.72; g.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.44), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+  cap.position.y = 1.94; g.add(cap);
+  armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.7, 0.18), skin); armL.position.set(-0.42, 1.05, 0); g.add(armL);
+  armR = armL.clone(); armR.position.x = 0.42; g.add(armR);
+  legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.75, 0.22), pants); legL.position.set(-0.16, 0.38, 0); g.add(legL);
+  legR = legL.clone(); legR.position.x = 0.16; g.add(legR);
+  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  G.scene.add(g);
+  G.player.mesh = g;
+  return g;
 }
-export function tryEnterCar(W) {
-  const P = W.player;
-  if (P.car) { exitCar(W); return true; }
-  // Cari mobil terdekat dalam 4,5 m (parkir / traffic / misi).
-  let best = null, bd = 4.5;
-  for (const car of W.cars.list) {
-    if (car.driver === 'police' || car.driver === 'courier' || car.driver === 'rival') continue;
-    const d = Math.hypot(car.x - P.x, car.z - P.z);
-    if (d < bd) { bd = d; best = car; }
-  }
-  if (!best) return false;
-  if (best.driver === 'traffic') {
-    // Pengemudi ditarik keluar, kabur.
-    best.driver = 'parked';
-    W.audio.blip(300, 0.15, 'square', 0.25, -100);
-  }
-  if (best === W.traffic.missionCar && W.missions.current === 0 && !W.missions.flags.stoleVeloz) {
-    W.missions.flags.stoleVeloz = true;
-    W.hud.toast('VELOZ COMET RS dicuri! Antar ke bengkel Mara.');
-  }
-  best.driver = 'player';
-  P.car = best;
-  P.group.visible = false;
-  W.audio.engine(true, 0);
-  W.hud.setPrompt('');
-  if (W.police.nearbyPolice(P.x, P.z, 25)) {
-    W.police.addWanted(W, 1, 'curi mobil di depan PCPD');
-  }
-  return true;
-}
-export function exitCar(W) {
-  const P = W.player;
-  if (!P.car) return;
-  const car = P.car;
-  car.driver = 'parked';
-  car.speed = 0;
-  const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-  P.x = car.x - fx * 2.6; P.z = car.z - fz * 2.6;
-  P.heading = car.heading;
-  P.car = null;
-  P.group.visible = true;
-  P.group.position.set(P.x, 0, P.z);
-  W.audio.engine(false);
-}
-export function updatePlayer(W, dt) {
-  const P = W.player;
-  const input = W.input;
-  const look = input.lookDelta();
-  P.camYaw = wrapAngle(P.camYaw - look.dx * 0.0032);
-  P.camPitch = clamp(P.camPitch + look.dy * 0.0022, -0.15, 1.1);
-  if (input.action('camera')) {
-    P.camMode = (P.camMode + 1) % 3;
-    P.camDist = [7, 11, 4.5][P.camMode];
-    W.hud.toast(['Kamera: dekat', 'Kamera: jauh', 'Kamera: kap mesin'][P.camMode]);
-  }
-  if (P.car) {
-    // Mengemudi: joystick / WASD.
-    const axis = input.moveAxis();
-    const ctrl = {
-      throttle: axis.y,
-      steer: -axis.x,
-      brake: input.brake() && axis.y <= 0,
-      handbrake: input.action('handbrake'),
-    };
-    if (input.action('horn')) W.audio.horn();
-    updatePlayerCar(W, P.car, dt, ctrl);
-    W.audio.engine(true, Math.abs(P.car.speed) / P.car.spec.top);
-    if (input.action('enter')) exitCar(W);
-    updateCamera(W, dt);
+export function updatePlayer(dt) {
+  const p = G.player;
+  const a = axis();
+  if (G.car) {
+    updatePlayerCar(dt, a.f, a.s);
+    if (wasPressed('KeyE') || G.touch.enterPressed) { G.touch.enterPressed = false; exitCar(); playBlip(520); }
+    p.mesh.visible = false;
+    updateCamera(dt);
     return;
   }
-  // Jalan kaki.
-  const axis = input.moveAxis();
-  const sprint = input.action('sprint');
-  const speed = sprint ? CFG.runSpeed : CFG.walkSpeed;
-  let mx = 0, mz = 0;
-  if (axis.x !== 0 || axis.y !== 0) {
-    const sin = Math.sin(P.camYaw), cos = Math.cos(P.camYaw);
-    mx = sin * axis.y + cos * axis.x;
-    mz = cos * axis.y - sin * axis.x;
-    const len = Math.hypot(mx, mz) || 1;
-    mx /= len; mz /= len;
-    P.heading = Math.atan2(mx, mz);
+  p.mesh.visible = true;
+  // Arah gerak relatif kamera: W = menjauhi kamera.
+  const run = G.keys.ShiftLeft || G.keys.ShiftRight;
+  const speed = run ? CFG.runSpeed : CFG.walkSpeed;
+  const cy = G.camYaw;
+  const fx = Math.sin(cy), fz = Math.cos(cy);
+  const rx = Math.cos(cy), rz = -Math.sin(cy);
+  let mx = fx * a.f + rx * a.s, mz = fz * a.f + rz * a.s;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 0.01) {
+    mx /= ml; mz /= ml;
+    p.yaw = Math.atan2(mx, mz);
+    p.x += mx * speed * dt; p.z += mz * speed * dt;
+    p.speed = speed;
+    const ph = G.time * (run ? 13 : 9);
+    legL.rotation.x = Math.sin(ph) * 0.7; legR.rotation.x = -Math.sin(ph) * 0.7;
+    armL.rotation.x = -Math.sin(ph) * 0.5; armR.rotation.x = Math.sin(ph) * 0.5;
+  } else {
+    p.speed = 0;
+    legL.rotation.x *= 0.8; legR.rotation.x *= 0.8; armL.rotation.x *= 0.8; armR.rotation.x *= 0.8;
   }
-  const targetSpeed = (axis.x !== 0 || axis.y !== 0) ? speed : 0;
-  P.speed += (targetSpeed - P.speed) * Math.min(1, dt * 10);
-  P.x += mx * P.speed * dt;
-  P.z += mz * P.speed * dt;
-  // Gravitasi + lompat.
-  if (input.action('jump') && P.onGround) { P.vy = CFG.jumpSpeed; P.onGround = false; }
-  P.vy -= CFG.gravity * dt;
-  P.y += P.vy * dt;
-  if (P.y <= 0) { P.y = 0; P.vy = 0; P.onGround = true; }
-  const hit = collideBuildings(W, P.x, P.z, CFG.playerRadius);
-  if (hit) { P.x += hit.x; P.z += hit.z; }
-  // Dermaga: koridor pejalan kaki ke ujung pier (x sampai -352, z ~60).
-  const minX = Math.abs(P.z - 60) < 6 ? -352 : -308;
-  P.x = clamp(P.x, minX, 308); P.z = clamp(P.z, -308, 308);
-  // Animasi jalan prosedural.
-  P.phase += dt * P.speed * 2.2;
-  const swing = Math.sin(P.phase) * (P.speed > 0.5 ? 0.6 : 0);
-  const parts = P.group.userData.parts;
-  parts.legL.rotation.x = swing; parts.legR.rotation.x = -swing;
-  parts.armL.rotation.x = -swing * 0.8; parts.armR.rotation.x = swing * 0.8;
-  P.group.position.set(P.x, P.y, P.z);
-  P.group.rotation.y = P.heading;
-  if (P.gun) P.gun.visible = W.combat.weapon > 0 && !P.car;
-  // Prompt konteks: mobil di dekat?
-  let nearCar = null, bd = 4.5;
-  for (const car of W.cars.list) {
-    if (car.driver === 'police' || car.driver === 'courier' || car.driver === 'rival') continue;
-    const d = Math.hypot(car.x - P.x, car.z - P.z);
-    if (d < bd) { bd = d; nearCar = car; }
+  if (wasPressed('Space') && p.onGround) { p.vy = CFG.jumpV; p.onGround = false; }
+  if (!p.onGround) {
+    p.vy -= 22 * dt; p.y += p.vy * dt;
+    if (p.y <= 0) { p.y = 0; p.vy = 0; p.onGround = true; }
   }
-  if (nearCar) W.hud.setPrompt(`E — ${nearCar.driver === 'traffic' ? 'Curi' : 'Naik'} ${nearCar.spec.name}`);
-  else if (W.missions.nearInteract) W.hud.setPrompt(W.missions.nearInteract);
-  else W.hud.setPrompt('');
-  if (input.action('enter')) {
-    if (!tryEnterCar(W) && W.missions.onInteract) W.missions.onInteract(W);
+  // Tabrakan gedung (lingkaran vs AABB).
+  for (const c of G.city.colliders) {
+    if (p.x > c.x0 - 0.5 && p.x < c.x1 + 0.5 && p.z > c.z0 - 0.5 && p.z < c.z1 + 0.5) {
+      const dxl = p.x - (c.x0 - 0.5), dxr = (c.x1 + 0.5) - p.x, dzl = p.z - (c.z0 - 0.5), dzr = (c.z1 + 0.5) - p.z;
+      const m = Math.min(dxl, dxr, dzl, dzr);
+      if (m === dxl) p.x = c.x0 - 0.5; else if (m === dxr) p.x = c.x1 + 0.5;
+      else if (m === dzl) p.z = c.z0 - 0.5; else p.z = c.z1 + 0.5;
+    }
   }
-  updateCamera(W, dt);
+  // Tabrakan mobil: pemain tidak bisa jalan menembus mobil (berhenti di sisinya).
+  for (const v of G.vehicles) {
+    const dx = p.x - v.x, dz = p.z - v.z, d = Math.hypot(dx, dz);
+    if (d < 2.6 && d > 0.01) { p.x = v.x + (dx / d) * 2.6; p.z = v.z + (dz / d) * 2.6; }
+  }
+  p.x = clamp(p.x, -296, 296); p.z = clamp(p.z, -296, 296);
+  p.mesh.position.set(p.x, p.y, p.z);
+  p.mesh.rotation.y = p.yaw;
+  // Interaksi: E masuk mobil terdekat. Tekan selalu dikonsumsi (tap tanpa
+  // mobil di dekatnya tidak boleh nyangkut dan masuk mobil belakangan).
+  const near = nearestVehicle(p.x, p.z, 5);
+  G._nearCar = near;
+  if (wasPressed('KeyE') || G.touch.enterPressed) {
+    G.touch.enterPressed = false;
+    if (near) { enterCar(near); playBlip(660); }
+  }
+  updateCamera(dt);
 }
-export function updateCamera(W, dt) {
-  const P = W.player;
-  const cam = W.camera;
-  const cx = P.car ? P.car.x : P.x;
-  const cz = P.car ? P.car.z : P.z;
-  const cy = P.car ? 1.2 : P.y + 1.7;
-  // Kamera mengikuti heading mobil saat nyetir, bebas saat jalan kaki.
-  const yaw = P.car ? P.car.heading : P.camYaw;
-  const dist = P.camDist;
-  const pitch = P.camPitch;
-  const ox = Math.sin(yaw) * Math.cos(pitch) * dist;
-  const oz = Math.cos(yaw) * Math.cos(pitch) * dist;
-  const oy = Math.sin(pitch) * dist + 1.2;
-  const tx = cx - ox, tz = cz - oz, ty = cy + oy;
-  const k = Math.min(1, dt * 9);
-  cam.position.x += (tx - cam.position.x) * k;
-  cam.position.y += (ty - cam.position.y) * k;
-  cam.position.z += (tz - cam.position.z) * k;
-  cam.lookAt(cx, cy + 0.6, cz);
+export function updateCamera(dt) {
+  const p = G.player;
+  const cy = G.camYaw;
+  const tx = p.x - Math.sin(cy) * G.camDist;
+  const tz = p.z - Math.cos(cy) * G.camDist;
+  const ty = (G.car ? 4.2 : 3.2) + p.y;
+  G.camera.position.x += (tx - G.camera.position.x) * Math.min(1, dt * 8);
+  G.camera.position.y += (ty - G.camera.position.y) * Math.min(1, dt * 8);
+  G.camera.position.z += (tz - G.camera.position.z) * Math.min(1, dt * 8);
+  G.camera.lookAt(p.x, 1.4 + p.y, p.z);
+}
+export function distToMissionCar() {
+  const v = G.vehicles.find((x) => x.missionCar);
+  if (!v) return 999;
+  return Math.hypot(v.x - G.player.x, v.z - G.player.z);
 }

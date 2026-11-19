@@ -1,96 +1,129 @@
-// Suara sintetis WebAudio (tanpa file audio): mesin, klakson, sirene,
-// tembakan, pukulan, jingle misi, musik loop CELESTE 98.1. Semua no-op
-// bila AudioContext tidak tersedia; mulai hanya setelah gestur pemain.
-export function createAudio() {
-  let ctx = null, master = null, engineOsc = null, engineGain = null;
-  let sirenOsc = null, sirenGain = null, musicTimer = null, muted = false;
-  let musicOn = false, track = 0;
-  const A = {
-    ensure() {
-      if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
-      try {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        master = ctx.createGain();
-        master.gain.value = muted ? 0 : 0.5;
-        master.connect(ctx.destination);
-      } catch { ctx = null; }
-    },
-    setMuted(m) {
-      muted = m;
-      if (master) master.gain.value = m ? 0 : 0.5;
-    },
-    isMuted() { return muted; },
-    blip(freq, dur, type = 'sine', vol = 0.3, slide = 0) {
-      if (!ctx) return;
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = type; o.frequency.value = freq;
-      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), ctx.currentTime + dur);
-      g.gain.setValueAtTime(vol, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-      o.connect(g); g.connect(master);
-      o.start(); o.stop(ctx.currentTime + dur);
-    },
-    click() { A.blip(660, 0.07, 'square', 0.15); },
-    horn() { A.blip(370, 0.28, 'square', 0.25); A.blip(466, 0.28, 'square', 0.2); },
-    punch() { A.blip(140, 0.12, 'sawtooth', 0.35, -60); },
-    shot() { A.blip(180, 0.14, 'sawtooth', 0.4, -120); A.blip(90, 0.1, 'square', 0.3); },
-    reload() { A.blip(520, 0.06, 'square', 0.2); setTimeout(() => A.blip(760, 0.06, 'square', 0.2), 90); },
-    coin() { A.blip(990, 0.1, 'sine', 0.25); setTimeout(() => A.blip(1320, 0.18, 'sine', 0.25), 90); },
-    boom() { A.blip(70, 0.6, 'sawtooth', 0.5, -40); A.blip(45, 0.8, 'sine', 0.4); },
-    jingle() {
-      [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => A.blip(f, 0.22, 'triangle', 0.3), i * 110));
-    },
-    fail() { [392, 330, 262].forEach((f, i) => setTimeout(() => A.blip(f, 0.25, 'triangle', 0.25), i * 130)); },
-    engine(on, speed01 = 0) {
-      if (!ctx) return;
-      if (on && !engineOsc) {
-        engineOsc = ctx.createOscillator(); engineOsc.type = 'sawtooth';
-        engineGain = ctx.createGain(); engineGain.gain.value = 0.05;
-        const filt = ctx.createBiquadFilter(); filt.type = 'lowpass'; filt.frequency.value = 700;
-        engineOsc.connect(filt); filt.connect(engineGain); engineGain.connect(master);
-        engineOsc.start();
-      }
-      if (engineOsc) {
-        engineOsc.frequency.value = 55 + speed01 * 140;
-        engineGain.gain.value = on ? 0.04 + speed01 * 0.06 : 0;
-      }
-      if (!on && engineOsc) {
-        try { engineOsc.stop(); } catch { /* abaikan */ }
-        engineOsc = null; engineGain = null;
-      }
-    },
-    siren(on) {
-      if (!ctx) return;
-      if (on && !sirenOsc) {
-        sirenOsc = ctx.createOscillator(); sirenOsc.type = 'sine';
-        sirenGain = ctx.createGain(); sirenGain.gain.value = 0.045;
-        sirenOsc.connect(sirenGain); sirenGain.connect(master);
-        sirenOsc.start();
-        sirenOsc.frequency.setValueAtTime(650, ctx.currentTime);
-        sirenOsc.frequency.linearRampToValueAtTime(950, ctx.currentTime + 0.7);
-      } else if (!on && sirenOsc) {
-        try { sirenOsc.stop(); } catch { /* abaikan */ }
-        sirenOsc = null; sirenGain = null;
-      } else if (sirenOsc) {
-        const t = ctx.currentTime % 1.4;
-        sirenOsc.frequency.value = t < 0.7 ? 650 + (t / 0.7) * 300 : 950 - ((t - 0.7) / 0.7) * 300;
-      }
-    },
-    setMusic(on, trackIdx = 0) {
-      musicOn = on; track = trackIdx;
-      if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
-      if (!on || !ctx) return;
-      // Progresi Am – F – C – G, tempo santai, satu not per ketuk.
-      const chords = [[220, 261, 329], [174, 220, 261], [196, 246, 294], [164, 196, 246]];
-      let step = 0;
-      musicTimer = setInterval(() => {
-        if (!musicOn || muted) return;
-        const ch = chords[Math.floor(step / 4) % 4];
-        A.blip(ch[step % 3] * (track % 2 === 0 ? 1 : 1.12), 0.5, 'triangle', 0.07);
-        if (step % 8 === 0) A.blip(ch[0] / 2, 0.9, 'sine', 0.09);
-        step++;
-      }, 300);
-    },
+// Suara sintetis WebAudio — tanpa file audio. Mesin mengikuti kecepatan.
+import { G } from './config.js';
+let ctx = null, master = null, engOsc = null, engOsc2 = null, engGain = null, engFilter = null;
+let ambGain = null, musicGain = null, sirenOsc = null, sirenGain = null, skidSrc = null, skidGain = null;
+export const audioState = { engineOn: false, engineFreq: 0, engineGain: 0, muted: false, ambientOn: false, ctx: false };
+function noiseBuf() {
+  const b = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+export function initAudio() {
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination);
+    engOsc = ctx.createOscillator(); engOsc.type = 'sawtooth'; engOsc.frequency.value = 55;
+    engOsc2 = ctx.createOscillator(); engOsc2.type = 'square'; engOsc2.frequency.value = 28;
+    engFilter = ctx.createBiquadFilter(); engFilter.type = 'lowpass'; engFilter.frequency.value = 700;
+    engGain = ctx.createGain(); engGain.gain.value = 0;
+    engOsc.connect(engFilter); engOsc2.connect(engFilter); engFilter.connect(engGain); engGain.connect(master);
+    engOsc.start(); engOsc2.start();
+    const amb = ctx.createBufferSource(); amb.buffer = noiseBuf(); amb.loop = true;
+    const af = ctx.createBiquadFilter(); af.type = 'lowpass'; af.frequency.value = 320;
+    ambGain = ctx.createGain(); ambGain.gain.value = 0.05;
+    amb.connect(af); af.connect(ambGain); ambGain.connect(master); amb.start();
+    sirenOsc = ctx.createOscillator(); sirenOsc.type = 'sine'; sirenOsc.frequency.value = 700;
+    sirenGain = ctx.createGain(); sirenGain.gain.value = 0;
+    sirenOsc.connect(sirenGain); sirenGain.connect(master); sirenOsc.start();
+    skidSrc = ctx.createBufferSource(); skidSrc.buffer = noiseBuf(); skidSrc.loop = true;
+    const sf = ctx.createBiquadFilter(); sf.type = 'bandpass'; sf.frequency.value = 900; sf.Q.value = 2;
+    skidGain = ctx.createGain(); skidGain.gain.value = 0;
+    skidSrc.connect(sf); sf.connect(skidGain); skidGain.connect(master); skidSrc.start();
+    musicGain = ctx.createGain(); musicGain.gain.value = 0.05; musicGain.connect(master);
+    startMusic();
+    audioState.ctx = true; audioState.ambientOn = true;
+  } catch (e) { ctx = null; }
+  addEventListener('pointerdown', resumeAudio, { once: false });
+  addEventListener('keydown', resumeAudio, { once: false });
+}
+export function resumeAudio() { if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}); }
+function startMusic() {
+  // Pad chord A-minor bergilir, nada rendah, loop pelan.
+  const chords = [[220, 261.6, 329.6], [174.6, 220, 261.6], [196, 246.9, 293.7], [164.8, 220, 261.6]];
+  let i = 0;
+  const play = () => {
+    if (!ctx) return;
+    const ch = chords[i % chords.length]; i++;
+    for (const f of ch) {
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 1.2);
+      g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 7.5);
+      o.connect(g); g.connect(musicGain); o.start(); o.stop(ctx.currentTime + 7.6);
+    }
+    setTimeout(play, 8000);
   };
-  return A;
+  play();
+}
+export function updateAudio(dt) {
+  if (!ctx) return;
+  if (master) master.gain.value = G.muted ? 0 : 0.5;
+  audioState.muted = G.muted;
+  const speed = G.car ? Math.abs(G.car.speed) : 0;
+  const top = G.car ? G.car.top : 1;
+  const ratio = Math.min(1, speed / top);
+  const driving = !!G.car;
+  const rpm = 42 + ratio * 165 + (driving ? 8 : 0);
+  if (engOsc) {
+    engOsc.frequency.setTargetAtTime(rpm, ctx.currentTime, 0.06);
+    engOsc2.frequency.setTargetAtTime(rpm * 0.5, ctx.currentTime, 0.06);
+    engFilter.frequency.setTargetAtTime(500 + ratio * 2600, ctx.currentTime, 0.1);
+  }
+  const target = driving ? 0.05 + ratio * 0.075 : 0.012;
+  if (engGain) engGain.gain.setTargetAtTime(target, ctx.currentTime, 0.1);
+  audioState.engineOn = driving && !G.muted;
+  audioState.engineFreq = Math.round(rpm);
+  audioState.engineGain = +target.toFixed(3);
+  if (ambGain) ambGain.gain.setTargetAtTime(0.03 + G.nightF * 0.01 + Math.min(0.03, G.traffic.length * 0.001), ctx.currentTime, 0.5);
+  if (sirenGain) sirenGain.gain.setTargetAtTime(G.wanted >= 2 ? 0.028 : 0, ctx.currentTime, 0.3);
+  if (sirenOsc && G.wanted >= 2) sirenOsc.frequency.setTargetAtTime(650 + 250 * Math.sin(G.time * 2.4), ctx.currentTime, 0.05);
+  const skidding = !!(G.car && G.keys.ShiftLeft && Math.abs(G.car.speed) > 8);
+  if (skidGain) skidGain.gain.setTargetAtTime(skidding ? 0.06 : 0, ctx.currentTime, 0.08);
+  audioState.skidding = skidding;
+  // Kicau burung acak di siang hari.
+  if (ctx && G.timeOfDay > 6 && G.timeOfDay < 18 && Math.random() < dt * 0.25) chirp();
+}
+function chirp() {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  const f0 = 2400 + Math.random() * 1200;
+  o.frequency.setValueAtTime(f0, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(f0 * 1.4, ctx.currentTime + 0.12);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, ctx.currentTime);
+  g.gain.linearRampToValueAtTime(0.03, ctx.currentTime + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+  o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime + 0.32);
+}
+export function playHorn() {
+  if (!ctx || G.muted) return;
+  const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = 370;
+  const o2 = ctx.createOscillator(); o2.type = 'square'; o2.frequency.value = 466;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.12, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+  o.connect(g); o2.connect(g); g.connect(master); o.start(); o2.start(); o.stop(ctx.currentTime + 0.5); o2.stop(ctx.currentTime + 0.5);
+}
+export function playShot() {
+  if (!ctx || G.muted) return;
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf();
+  const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 900;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.25, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16);
+  s.connect(f); f.connect(g); g.connect(master); s.start(); s.stop(ctx.currentTime + 0.18);
+}
+export function playJingle() {
+  if (!ctx || G.muted) return;
+  [523, 659, 784, 1046].forEach((f, i) => {
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
+    const g = ctx.createGain(); const t = ctx.currentTime + i * 0.12;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.12, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.55);
+  });
+}
+export function playBlip(f = 880) {
+  if (!ctx || G.muted) return;
+  const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.08, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+  o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime + 0.16);
 }

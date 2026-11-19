@@ -1,57 +1,50 @@
-// Tuning SOLARA BAY (ronde 6g). Semua angka gameplay di satu tempat.
+// SOLARA BAY — tuning + state bersama. Semua modul impor G dari sini.
 export const CFG = {
-  seed: 1,
-  mapHalf: 320, // peta 640 x 640 m, pantai di barat (x negatif)
-  // Pemain jalan kaki
-  walkSpeed: 4.2, runSpeed: 7.5, jumpSpeed: 7.5, gravity: 20,
-  playerRadius: 0.55,
-  // Mobil (arcade)
-  carAccel: 16, carBrake: 30, carReverse: 9, carMax: 38, carDrag: 0.35,
-  carTurn: 1.9, carGrip: 6,
-  // Waktu: 1 jam game = 75 detik nyata; mulai 10:00
-  hourLength: 75, startHour: 10,
-  // Wanted / PCPD
-  wantedDecaySeen: 10, wantedDecayHidden: 20, resprayPerStar: 100,
-  // Ekonomi
-  startCash: 250, taxiFare: 120, sunCoinValue: 50, stuntBonus: 200,
-  // Senjata: [nama, harga, peluru/mag, damage, fireRate]
-  weapons: [
-    { name: 'FISTS', price: 0, mag: Infinity, dmg: 12, rate: 0.45, auto: false },
-    { name: 'VESPER 72', price: 0, mag: 12, dmg: 22, rate: 0.22, auto: false },
-    { name: 'MAKO 150', price: 800, mag: 30, dmg: 14, rate: 0.09, auto: true },
-    { name: 'BREAKER', price: 3800, mag: 6, dmg: 65, rate: 0.8, auto: false },
-    { name: 'KESTREL', price: 0, mag: 8, dmg: 90, rate: 1.1, auto: false, locked: true },
-  ],
-  // Dunia
-  trafficCars: 14, peds: 36, birds: 14, sunCoins: 30,
-  spawn: { x: 24, z: 96, heading: -2.78 },
-  // Warna langit per jam (dipakai render.js): [jam, atas, horizon, kabut]
-  skyStops: [
-    [0, 0x0a1030, 0x1c2a55, 0x0d1526], [5, 0x1a2450, 0x7a5a8a, 0x2a2440],
-    [7, 0x5a8fd0, 0xffc98a, 0xc9a06a], [10, 0x3f8fd8, 0xbfe6f5, 0x8fc3e8],
-    [15, 0x3a8ad8, 0xcfeef8, 0x9fd0ea], [17.5, 0x6a5ac0, 0xff9d5c, 0xe8a06a],
-    [18.8, 0x8a4a9a, 0xff7e5e, 0xd86a6a], [20, 0x141c44, 0x3a2a5e, 0x1a2038],
-    [22, 0x070d24, 0x141c3c, 0x0b1020],
-  ],
-  radioTracks: [
-    'Malecón Mirage · Vela Roja', 'Sunset Static · Los Cometas',
-    'Palm Static · DJ Lupe', 'Golden Hour · Nico Vega',
-    'Neon Palms · Marlin Sound', 'Celeste Nights · La Ola',
-  ],
-  pcpdUnits: ['PELICAN-11', 'GECKO-25', 'AIR-1', 'BARRACUDA-18', 'TAC-45',
-    'VIPER-07', 'SHARK-33', 'ORCA-52', 'FALCON-09', 'COBRA-21'],
-  pedNames: ['Ana', 'Beto', 'Carla', 'Dio', 'Elena', 'Felix', 'Gita', 'Hugo',
-    'Ira', 'Jo', 'Kiki', 'Leo', 'Mia', 'Nia', 'Omar', 'Pia', 'Riko', 'Sari'],
+  world: 300, roadAt: [-240, -120, 0, 120, 240], roadW: 12,
+  walkSpeed: 6, runSpeed: 10, jumpV: 7,
+  carAccel: 16, carBrake: 30,
+  carMax: { sedan: 34, sport: 46, taxi: 32, truck: 26, van: 30, bus: 24, police: 40 },
+  carTurn: 1.9, trafficCount: 22, pedCount: 90, parkedCount: 16,
+  taxiFare: 40, racePrize: 120, fishPrice: 15, photoBonus: 60, respray: 100,
 };
-// Spesifikasi tiap model mobil: [nama, warna, topSpeed, accel, handling, harga]
-export const CAR_KINDS = {
-  cometa: { name: 'COMETA', color: 0x3a7bd5, top: 30, accel: 13, turn: 1.7 },
-  pip: { name: 'PIP', color: 0xe8b93e, top: 26, accel: 12, turn: 2.1 },
-  cabro: { name: 'CABRO TAXI', color: 0xf2c200, top: 29, accel: 12, turn: 1.8 },
-  mula: { name: 'MULA VAN', color: 0x8a94a6, top: 24, accel: 10, turn: 1.4 },
-  veloz: { name: 'VELOZ COMET RS', color: 0xd21f2b, top: 42, accel: 19, turn: 2.2 },
-  hauler: { name: 'HAULER', color: 0x4a6b4f, top: 22, accel: 9, turn: 1.2 },
-  pcpd: { name: 'PCPD INTERCEPTOR', color: 0x1a2a4a, top: 36, accel: 17, turn: 2.0 },
-  bus: { name: 'BUS SOLARA', color: 0x2a9d8f, top: 22, accel: 8, turn: 1.1 },
-  taco: { name: 'TACO TRUCK', color: 0xff8c42, top: 20, accel: 8, turn: 1.2 },
+export const CAR_TYPES = {
+  sedan: { name: 'Cometa', color: 0x3a7bd5, top: 34, acc: 15 },
+  sport: { name: 'VELOZ COMET RS', color: 0xff2e7e, top: 46, acc: 19 },
+  taxi: { name: 'Cabro Taxi', color: 0xf5c518, top: 32, acc: 15 },
+  truck: { name: 'Hauler', color: 0xc96a1e, top: 26, acc: 11 },
+  van: { name: 'Mula Van', color: 0x7d8a99, top: 30, acc: 13 },
+  bus: { name: 'Solara Bus', color: 0x2e9e6b, top: 24, acc: 10 },
+  police: { name: 'PCPD Interceptor', color: 0x1a1d24, top: 40, acc: 18 },
 };
+export const DISTRICTS = [
+  { name: 'Malecón Celeste', x0: -300, z0: -300, x1: -200, z1: 300 },
+  { name: 'Marina Bay', x0: -200, z0: -300, x1: -60, z1: -60 },
+  { name: 'Old Solara', x0: -200, z0: -60, x1: -60, z1: 180 },
+  { name: 'The Spires', x0: -60, z0: -300, x1: 180, z1: -60 },
+  { name: 'The Docks', x0: 180, z0: -300, x1: 300, z1: -60 },
+  { name: 'Vista Hills', x0: -60, z0: 180, x1: 300, z1: 300 },
+  { name: 'Calle Verde', x0: -200, z0: 180, x1: -60, z1: 300 },
+];
+export const G = {
+  ready: false, state: 'title', paused: false, time: 0, timeOfDay: 17.4, day: 1,
+  cash: 10350, wanted: 0, heat: 0, health: 100, armor: 0, weapon: 0, ammo: [Infinity, 72, 150],
+  missionIdx: 0, missionStep: 0, missionTimer: 0, missionsDone: 0, respect: 1,
+  player: { x: 0, z: 36, y: 0, yaw: Math.PI, vy: 0, onGround: true, mesh: null, speed: 0 },
+  camYaw: Math.PI, camDist: 9, car: null, vehicles: [], traffic: [], peds: [], police: [],
+  heli: null, birds: [], clouds: [], coins: 0, photos: [], fish: [], fishCaught: {},
+  taxi: { active: false, phase: '', tx: 0, tz: 0, t: 0, fare: 0, done: 0 },
+  race: { active: false, step: 0, t: 0, rivals: [], place: 0, done: 0 },
+  fishing: { active: false, spot: -1, bar: 0, dir: 1, hits: 0, need: 3 },
+  sideJob: { active: false, tx: 0, tz: 0, t: 0, done: 0 },
+  dialog: null, objective: '', prompt: '', toast: '', toastT: 0,
+  nightF: 0, sunsetF: 0, muted: false, stats: { stolen: 0, busted: 0, playT: 0 },
+  city: null, scene: null, renderer: null, camera: null, sun: null, hemi: null,
+  skyMat: null, sunSprite: null, moonSprite: null, stars: null, keys: {},
+  touch: { active: false, joyX: 0, joyY: 0, camDrag: false },
+  seed: 1, shot: '',
+};
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d.name;
+  return 'Solara Bay';
+}
+export function fmtCash(n) { return '$' + Math.floor(n).toLocaleString('en-US'); }

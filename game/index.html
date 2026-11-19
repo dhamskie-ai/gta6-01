@@ -6,202 +6,128 @@
 <title>SOLARA BAY — Make GTA 6</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1020;
-    font-family: "Segoe UI", system-ui, -apple-system, sans-serif; color: #fff;
-    -webkit-user-select: none; user-select: none; touch-action: none; }
-  #app { position: fixed; inset: 0; }
-  #game, #game canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  .panel { background: rgba(8, 12, 28, .78); border: 1px solid rgba(255, 210, 90, .35);
-    border-radius: 10px; padding: 8px 12px; backdrop-filter: blur(2px); }
-  #hud { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 5; }
-  #hud.on { display: block; }
-  #mission { position: absolute; top: 12px; left: 12px; width: 340px; }
-  #m-tag { display: inline-block; background: #ffd25a; color: #1a1200; font-weight: 800;
-    font-size: 12px; padding: 2px 8px; border-radius: 4px; letter-spacing: .5px; }
-  #m-title { font-size: 19px; font-weight: 800; margin-top: 4px; letter-spacing: .4px; }
-  #m-timer { float: right; font-size: 16px; font-weight: 700; color: #ffd25a; }
-  #m-obj { font-size: 14px; margin-top: 3px; line-height: 1.35; }
-  #m-sub { font-size: 12px; color: #8fe3a0; margin-top: 2px; }
-  #m-stage { height: 6px; background: rgba(255,255,255,.15); border-radius: 3px; margin-top: 6px; overflow: hidden; }
-  #m-stage-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ff9d5c, #ffd25a); }
-  #m-next { font-size: 12px; color: #ffd25a; margin-top: 4px; }
-  #pcpd { position: absolute; top: 172px; left: 12px; width: 340px; font-size: 12px; display: none; }
-  #pcpd h3 { font-size: 12px; letter-spacing: 1px; color: #ff8a8a; }
-  #pcpd-list div { display: flex; justify-content: space-between; padding: 2px 0; }
-  .pcpd-act { background: #d33; color: #fff; border-radius: 3px; padding: 0 6px; font-weight: 700; font-size: 11px; }
-  .pcpd-act.blue { background: #2f6fd6; }
-  #bars { position: absolute; top: 12px; left: 366px; width: 170px; }
-  .bar { height: 10px; background: rgba(255,255,255,.15); border-radius: 5px; overflow: hidden; margin-top: 5px; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1026; font-family: Arial, Helvetica, sans-serif; }
+  #c { display: block; width: 100%; height: 100%; touch-action: none; }
+  .panel { background: rgba(10, 12, 24, 0.72); color: #fff; border-radius: 10px; padding: 10px 12px; backdrop-filter: blur(2px); }
+  #hud { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #mission-panel { position: absolute; top: 12px; left: 12px; width: 330px; border-left: 4px solid #ff2e7e; }
+  #mp-chapter { color: #ffd23f; font-weight: bold; font-size: 13px; letter-spacing: 1px; }
+  #mp-timer { float: right; font-size: 20px; font-weight: bold; color: #fff; }
+  #mp-objective { font-size: 16px; font-weight: bold; margin: 6px 0 2px; line-height: 1.25; }
+  #mp-stage { color: #7dff8a; font-size: 12px; font-weight: bold; }
+  #mp-next { color: #bcd; font-size: 12px; margin-top: 4px; }
+  #vitals { margin-top: 8px; }
+  .bar { height: 8px; background: #333; border-radius: 4px; overflow: hidden; margin: 3px 0; }
   .bar > div { height: 100%; }
-  #hp-fill { background: #57e389; width: 100%; }
-  #ar-fill { background: #6db7ff; width: 0%; }
-  .bar-label { font-size: 10px; letter-spacing: 1px; color: #cfe0ff; }
+  #hp-bar { background: #2eff5e; width: 100%; }
+  #ar-bar { background: #37e0ff; width: 0%; }
   #top-right { position: absolute; top: 12px; right: 12px; text-align: right; }
-  #cash { font-size: 30px; font-weight: 800; color: #7dff9b; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
-  #stars { font-size: 22px; letter-spacing: 2px; color: #ffd25a; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
-  #stars .off { color: rgba(255,255,255,.25); }
-  #clock { font-size: 14px; color: #ffe9b0; margin-top: 2px; }
-  #weapons { position: absolute; top: 118px; right: 12px; display: flex; gap: 6px; }
-  .wslot { width: 62px; padding: 5px 4px; text-align: center; border-radius: 8px;
-    background: rgba(8,12,28,.78); border: 1px solid rgba(255,255,255,.18); font-size: 11px; }
-  .wslot.sel { border-color: #ffd25a; box-shadow: 0 0 0 1px #ffd25a; }
-  .wslot.locked { opacity: .45; }
-  .wslot b { display: block; font-size: 12px; }
-  .wslot .ammo { color: #ffd25a; font-weight: 700; }
-  #speedo { position: absolute; right: 12px; bottom: 12px; width: 210px; text-align: right; }
-  #spd-num { font-size: 52px; font-weight: 800; line-height: .9; }
-  #spd-num small { font-size: 16px; color: #ffd25a; }
-  #spd-car { font-size: 13px; font-weight: 700; color: #ffd25a; }
-  #cond { height: 6px; background: rgba(255,255,255,.15); border-radius: 3px; margin-top: 4px; overflow: hidden; }
-  #cond-fill { height: 100%; width: 100%; background: #57e389; }
-  #radio { position: absolute; right: 12px; bottom: 118px; text-align: right; font-size: 13px; }
-  #radio-name { color: #ff9de2; font-weight: 800; letter-spacing: 1px; }
-  #radio-track { color: #ffe9b0; }
-  #minimap-wrap { position: absolute; left: 12px; bottom: 12px; }
-  #minimap { width: 180px; height: 180px; border-radius: 50%; border: 3px solid rgba(255,210,90,.6);
-    background: #0d1a2e; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
-  #street { font-size: 13px; font-weight: 700; color: #ffd25a; margin-top: 4px;
-    text-shadow: 0 1px 4px #000; }
-  #respect { font-size: 11px; color: #cfe0ff; margin-top: 2px; }
-  #respect-bar { height: 5px; background: rgba(255,255,255,.15); border-radius: 3px; margin-top: 2px; overflow: hidden; }
-  #respect-fill { height: 100%; width: 0%; background: #ff9de2; }
-  #prompt { position: absolute; left: 50%; bottom: 118px; transform: translateX(-50%);
-    font-size: 16px; font-weight: 700; background: rgba(8,12,28,.8); padding: 7px 16px;
-    border-radius: 8px; border: 1px solid rgba(255,210,90,.5); display: none; white-space: nowrap; }
-  #dialog { position: absolute; left: 50%; bottom: 168px; transform: translateX(-50%);
-    width: 520px; max-width: 92vw; display: none; }
-  #dlg-name { color: #ffd25a; font-weight: 800; font-size: 14px; }
-  #dlg-role { color: #ff9de2; font-size: 11px; letter-spacing: 1px; margin-left: 6px; }
-  #dlg-text { font-size: 15px; margin-top: 3px; line-height: 1.4; }
-  #toast { position: absolute; left: 50%; top: 84px; transform: translateX(-50%);
-    font-size: 15px; font-weight: 700; background: rgba(8,12,28,.85); padding: 8px 18px;
-    border-radius: 8px; border: 1px solid rgba(125,255,155,.6); display: none; white-space: nowrap; }
-  .screen { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center;
-    background: linear-gradient(180deg, rgba(20,8,40,.82), rgba(8,12,28,.88)); }
-  .screen h1 { font-size: 64px; font-weight: 900; letter-spacing: 4px;
-    background: linear-gradient(180deg, #ffe9a8, #ff9d5c 55%, #ff5e8a);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    text-shadow: 0 4px 30px rgba(255,120,80,.35); }
-  .screen h2 { font-size: 15px; letter-spacing: 3px; color: #ffd25a; margin-top: 2px; }
-  .screen p { max-width: 560px; margin: 14px 0; line-height: 1.5; color: #dfe8ff; font-size: 15px; }
-  .btn { pointer-events: auto; cursor: pointer; border: none; border-radius: 10px;
-    padding: 12px 34px; font-size: 17px; font-weight: 800; letter-spacing: 1px;
-    background: linear-gradient(180deg, #ffd25a, #ff9d5c); color: #231303; margin: 6px; }
-  .btn.ghost { background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.35); }
-  .btn:hover { filter: brightness(1.12); }
-  .keys { font-size: 13px; color: #b9c6e8; line-height: 1.9; margin-top: 10px; }
-  .keys b { color: #ffd25a; }
-  #screen-pause, #screen-end, #screen-dead { display: none; }
-  #dead-title { font-size: 58px; }
-  /* Kontrol sentuh: hanya tampil di perangkat sentuh (touch.js yang menampilkan). */
-  #touch-ui { position: absolute; inset: 0; z-index: 8; pointer-events: none; display: none; }
-  #joy-base { position: absolute; left: 26px; bottom: 210px; width: 132px; height: 132px;
-    border-radius: 50%; background: rgba(255,255,255,.10); border: 2px solid rgba(255,255,255,.35);
-    pointer-events: auto; touch-action: none; }
-  #joy-knob { position: absolute; left: 36px; top: 36px; width: 60px; height: 60px; border-radius: 50%;
-    background: rgba(255,210,90,.85); border: 2px solid rgba(255,255,255,.7); }
-  #touch-btns { position: absolute; right: 22px; bottom: 210px; display: flex; flex-direction: column;
-    gap: 12px; align-items: flex-end; pointer-events: auto; }
-  .tbtn { width: 84px; height: 84px; border-radius: 50%; border: 2px solid rgba(255,255,255,.55);
-    background: rgba(8,12,28,.65); color: #fff; font-size: 13px; font-weight: 800;
-    letter-spacing: .5px; touch-action: none; }
-  .tbtn.small { width: 66px; height: 66px; font-size: 12px; }
-  .tbtn.pressed { background: rgba(255,210,90,.85); color: #231303; }
-  #touch-hint { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
-    font-size: 12px; color: rgba(255,255,255,.65); pointer-events: none; }
-  @media (max-width: 900px) {
-    #mission { width: 250px; } #m-title { font-size: 15px; }
-    #pcpd { display: none !important; }
-    #bars { left: 274px; width: 120px; }
-    #minimap { width: 120px; height: 120px; }
-    #joy-base { bottom: 160px; } #touch-btns { bottom: 160px; }
-    .screen h1 { font-size: 40px; }
-    #dialog { bottom: 300px; }
-  }
+  #cash { font-size: 30px; font-weight: bold; color: #7dff8a; text-shadow: 0 2px 6px #000; }
+  #wanted { font-size: 24px; letter-spacing: 3px; text-shadow: 0 2px 6px #000; }
+  #clock { color: #fff; font-size: 13px; text-shadow: 0 1px 4px #000; }
+  #sight { color: #ff8080; font-size: 12px; font-weight: bold; }
+  #weapons { margin-top: 6px; font-size: 11px; }
+  .wslot { background: rgba(10,12,24,.8); color: #ddd; padding: 4px 6px; border-radius: 5px; margin-left: 4px; }
+  .wslot.on { background: #ffd23f; color: #111; font-weight: bold; }
+  #weapon-now { color: #ffd23f; font-size: 12px; font-weight: bold; margin-top: 4px; }
+  #police-list { margin-top: 8px; text-align: left; font-size: 12px; }
+  #police-list .prow { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+  #police-list .ram { color: #ff4040; } #police-list .pur { color: #ffd23f; }
+  #minimap-wrap { position: absolute; left: 12px; bottom: 12px; text-align: center; }
+  #minimap { border-radius: 50%; border: 3px solid #37e0ff; width: 200px; height: 200px; background: #1c2b1a; }
+  #district { color: #ffd23f; font-weight: bold; font-size: 13px; margin-top: 4px; text-shadow: 0 1px 4px #000; }
+  #respect { color: #fff; font-size: 11px; }
+  #respect-bar { height: 6px; background: #2eff5e; width: 20%; border-radius: 3px; margin: 2px auto 0; max-width: 160px; }
+  #dialog { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: 460px; display: none; align-items: center; gap: 10px; }
+  #dlg-portrait { width: 56px; height: 56px; border-radius: 8px; background: linear-gradient(135deg, #ff2e7e, #37e0ff); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; flex-shrink: 0; }
+  #dlg-name { color: #ffd23f; font-size: 12px; font-weight: bold; }
+  #dlg-text { font-size: 14px; margin-top: 2px; line-height: 1.3; }
+  #speed-box { position: absolute; right: 12px; bottom: 12px; text-align: right; width: 240px; }
+  #radio-station { color: #ff7ad9; font-weight: bold; font-size: 14px; }
+  #radio-track { color: #fff; font-size: 12px; }
+  #car-name { color: #fff; font-weight: bold; font-size: 14px; margin-top: 6px; }
+  #cond-bar { height: 6px; background: #2eff5e; width: 100%; border-radius: 3px; margin: 3px 0; }
+  #speed-num { font-size: 44px; font-weight: bold; color: #fff; line-height: 1; }
+  #speed-num small { font-size: 14px; }
+  #engine-state { color: #9fd8ff; font-size: 11px; }
+  #activity { position: absolute; left: 12px; top: 250px; font-size: 12px; color: #fff; }
+  #activity div { background: rgba(10,12,24,.65); padding: 4px 8px; border-radius: 6px; margin-bottom: 4px; }
+  #prompt { position: absolute; bottom: 170px; left: 50%; transform: translateX(-50%); font-size: 15px; font-weight: bold; color: #ffe14d; text-shadow: 0 2px 4px #000; }
+  #toast { position: absolute; top: 110px; left: 50%; transform: translateX(-50%); font-size: 16px; font-weight: bold; color: #fff; background: rgba(10,12,24,.8); padding: 8px 14px; border-radius: 8px; display: none; }
+  #fish-bar { position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%); width: 300px; height: 18px; background: #222; border: 2px solid #fff; border-radius: 9px; display: none; overflow: hidden; }
+  #fish-zone { position: absolute; left: 30%; width: 50%; height: 100%; background: #2eff5e; }
+  #fish-cursor { position: absolute; left: 0; width: 6px; height: 100%; background: #fff; }
+  #btn-mute { position: absolute; top: 12px; left: 360px; pointer-events: auto; background: rgba(10,12,24,.8); color: #fff; border: 1px solid #666; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(20,10,40,.82), rgba(255,110,60,.55)); color: #fff; z-index: 10; text-align: center; }
+  .screen h1 { font-size: 64px; letter-spacing: 4px; color: #ffd23f; text-shadow: 0 4px 0 #ff2e7e, 0 8px 24px #000; }
+  .screen h2 { font-size: 18px; color: #fff; margin: 8px 0 20px; }
+  .screen p { max-width: 560px; font-size: 14px; line-height: 1.5; margin-bottom: 18px; }
+  .screen button { pointer-events: auto; font-size: 18px; font-weight: bold; padding: 12px 28px; margin: 6px; border: none; border-radius: 10px; background: #ff2e7e; color: #fff; cursor: pointer; }
+  .screen button.alt { background: #37e0ff; color: #111; }
+  #pause, #busted { display: none; }
+  #touch-ui { display: none; position: fixed; inset: 0; z-index: 8; pointer-events: none; }
+  #joy-base { position: absolute; left: 24px; bottom: 90px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,.14); border: 2px solid rgba(255,255,255,.5); pointer-events: auto; }
+  #joy-knob { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  .tbtn { position: absolute; pointer-events: auto; background: rgba(10,12,24,.75); color: #fff; border: 2px solid #ffd23f; border-radius: 12px; font-weight: bold; font-size: 16px; padding: 14px 18px; }
+  #btn-enter { right: 24px; bottom: 200px; background: #ff2e7e; border-color: #fff; }
+  #btn-brake { right: 24px; bottom: 110px; }
+  #btn-cam { right: 140px; bottom: 110px; }
+  #btn-act { right: 140px; bottom: 200px; border-color: #37e0ff; }
+  .tbtn.on { background: #37e0ff; color: #111; }
 </style>
+<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
 </head>
 <body>
-<div id="app">
-  <div id="game"></div>
-  <div id="hud">
-    <div id="mission" class="panel">
-      <span id="m-tag">JOB 1/8</span><span id="m-timer"></span>
-      <div id="m-title">First Gear</div>
-      <div id="m-obj"></div>
-      <div id="m-sub"></div>
-      <div id="m-stage"><div id="m-stage-fill"></div></div>
-      <div id="m-next"></div>
-    </div>
-    <div id="pcpd" class="panel"><h3>PCPD RESPONSE</h3><div id="pcpd-list"></div></div>
-    <div id="bars">
-      <div class="bar-label">HEALTH</div><div class="bar"><div id="hp-fill"></div></div>
-      <div class="bar-label">ARMOR</div><div class="bar"><div id="ar-fill"></div></div>
-    </div>
-    <div id="top-right">
-      <div id="cash">$0</div>
-      <div id="stars"></div>
-      <div id="clock"></div>
-    </div>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="mission-panel" class="panel">
+    <div><span id="mp-chapter">JOB 1/8 · FIRST GEAR</span><span id="mp-timer"></span></div>
+    <div id="mp-objective">Curi VELOZ COMET RS pink di depanmu (E)</div>
+    <div id="mp-stage">STAGE 1/2</div>
+    <div id="mp-next"></div>
+    <div id="vitals"><div class="bar"><div id="hp-bar"></div></div><div class="bar"><div id="ar-bar"></div></div></div>
+  </div>
+  <button id="btn-mute">🔊 SUARA</button>
+  <div id="top-right">
+    <div id="cash">$10,350</div>
+    <div id="wanted">☆☆☆☆☆</div>
+    <div id="clock">DAY 1 · 17:24</div>
+    <div id="sight"></div>
     <div id="weapons"></div>
-    <div id="radio"><div id="radio-name">♪ CELESTE 98.1</div><div id="radio-track"></div></div>
-    <div id="speedo">
-      <div id="spd-num">0 <small>km/h</small></div>
-      <div id="spd-car"></div>
-      <div id="cond"><div id="cond-fill"></div></div>
-    </div>
-    <div id="minimap-wrap">
-      <canvas id="minimap" width="180" height="180"></canvas>
-      <div id="street">Malecón Celeste</div>
-      <div id="respect">RESPECT · <span id="respect-text"></span></div>
-      <div id="respect-bar"><div id="respect-fill"></div></div>
-    </div>
-    <div id="prompt"></div>
-    <div id="dialog" class="panel"><span id="dlg-name"></span><span id="dlg-role"></span><div id="dlg-text"></div></div>
-    <div id="toast"></div>
+    <div id="weapon-now">FISTS</div>
+    <div id="police-list" class="panel" style="display:none"><b>🚔 PCPD RESPONSE · <span id="police-count"></span></b><div id="police-rows"></div></div>
   </div>
-  <div id="screen-title" class="screen">
-    <h1>SOLARA BAY</h1>
-    <h2>MAKE GTA 6 · MALECÓN CELESTE · CELESTE 98.1</h2>
-    <p>Nico pulang ke Solara Bay. Utang menumpuk, Marco menunggu di Marlin
-    Ceviche, dan PCPD mengawasi setiap tikungan. Curi mobil, kabur dari
-    kejaran, dan selesaikan 8 misi sebelum kapal Marco berlayar.</p>
-    <div>
-      <button class="btn" id="btn-new">NEW GAME</button>
-      <button class="btn ghost" id="btn-continue">CONTINUE</button>
-    </div>
-    <div class="keys" id="save-info"></div>
-    <div class="keys">WASD jalan / nyetir · Shift lari / handbrake · Space lompat ·
-      Mouse kamera · <b>E</b> masuk / curi mobil · Klik tembak · <b>1–5</b> senjata ·
-      <b>R</b> reload · Esc pause · <b>M</b> mute · <b>H</b> klakson<br>
-      Di HP: joystick kiri + tombol MASUK / REM / KAM, geser jari putar kamera.</div>
-  </div>
-  <div id="screen-pause" class="screen">
-    <h1 style="font-size:44px">PAUSE</h1>
-    <p id="pause-info"></p>
-    <div>
-      <button class="btn" id="btn-resume">RESUME</button>
-      <button class="btn ghost" id="btn-restart">RESTART MISI</button>
-    </div>
-    <div>
-      <button class="btn ghost" id="btn-save">SAVE</button>
-      <button class="btn ghost" id="btn-quit">QUIT TO TITLE</button>
-    </div>
-  </div>
-  <div id="screen-end" class="screen">
-    <h1 style="font-size:44px" id="end-title">GOLDEN HOUR</h1>
-    <p id="end-text"></p>
-    <div><button class="btn" id="btn-again">MAIN LAGI</button>
-    <button class="btn ghost" id="btn-title">TITLE</button></div>
-  </div>
-  <div id="screen-dead" class="screen">
-    <h1 id="dead-title">K.O.</h1>
-    <p id="dead-text"></p>
-    <div><button class="btn" id="btn-retry">RETRY MISI</button>
-    <button class="btn ghost" id="btn-dead-title">TITLE</button></div>
-  </div>
+  <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas><div id="district">MALECÓN CELESTE</div><div id="respect">RESPECT · ROOKIE 0/8</div><div id="respect-bar"></div></div>
+  <div id="dialog" class="panel"><div id="dlg-portrait">MA</div><div><div id="dlg-name"></div><div id="dlg-text"></div></div></div>
+  <div id="speed-box"><div id="radio-station">♪ CELESTE 98.1</div><div id="radio-track">Malecón Mirage — Vela Roja</div><div id="car-name">JALAN KAKI</div><div id="cond-bar"></div><div><span id="speed-num">0</span> <small>km/h</small></div><div id="engine-state">MESIN MATI</div></div>
+  <div id="activity"></div>
+  <div id="prompt"></div>
+  <div id="toast"></div>
+  <div id="fish-bar"><div id="fish-zone"></div><div id="fish-cursor"></div></div>
 </div>
-<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
+<div id="touch-ui">
+  <div id="joy-base"><div id="joy-knob"></div></div>
+  <button class="tbtn" id="btn-enter">MASUK</button>
+  <button class="tbtn" id="btn-brake">REM</button>
+  <button class="tbtn" id="btn-cam">KAM</button>
+  <button class="tbtn" id="btn-act">AKSI</button>
+</div>
+<div id="title" class="screen">
+  <h1>SOLARA BAY</h1>
+  <h2>Kota pantai. Satu mobil curian. Delapan misi. — Nico pulang.</h2>
+  <p>WASD jalan / nyetir · Shift lari &amp; handbrake · E masuk &amp; keluar mobil · Mouse geser = kamera · Klik kiri tembak · 1/2/3 ganti senjata · F aktivitas (taksi, balapan, mancing, foto) · H klakson · M mute · Esc jeda.<br>Di HP: joystick kiri, tombol MASUK / KELUAR / REM / KAM, geser jari = putar kamera.</p>
+  <div><button id="btn-new">▶ MAIN</button><button id="btn-continue" class="alt" style="display:none">LANJUTKAN</button></div>
+  <p style="font-size:12px;opacity:.8">GTA 6 versi make.fun — semua nama, mobil &amp; kota original. Offline, tanpa login.</p>
+</div>
+<div id="pause" class="screen">
+  <h1>JEDA</h1>
+  <div><button id="btn-resume">▶ LANJUT</button><button id="btn-restart" class="alt">↻ ULANG</button><button id="btn-quit" class="alt">✕ MENU</button></div>
+</div>
+<div id="busted" class="screen">
+  <h1>DITANGKAP</h1>
+  <h2>PCPD menangkap Nico. Coba lagi, lebih licin.</h2>
+  <div><button id="btn-restart2" onclick="location.reload()">↻ COBA LAGI</button></div>
+</div>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

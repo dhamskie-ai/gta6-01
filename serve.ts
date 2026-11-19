@@ -1,64 +1,28 @@
-// Server statis kecil untuk game/ (Node 22, stdlib saja) supaya SOLARA BAY
-// bisa dimainkan lokal tanpa build step: `node serve.ts` lalu buka
-// http://localhost:8080. Hanya mengirim file di bawah game/, menolak path
-// di luar root, dan tidak melakukan hal lain: ini alat dev, bukan server
-// untuk internet.
-import { createReadStream, statSync } from 'node:fs';
+// Server statis SOLARA BAY: sajikan game/ di http://localhost:8080.
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const argv = process.argv.slice(2);
-const portAt = argv.indexOf('--port');
-const wanted = portAt === -1 ? 8080 : Number(argv[portAt + 1]);
-const port = Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
-
-const MIME = {
+import { readFileSync, existsSync } from 'node:fs';
+import { join, extname, resolve } from 'node:path';
+const root = resolve(import.meta.dirname, 'game');
+const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
   '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
+  '.png': 'image/png',
+  '.css': 'text/css; charset=utf-8',
 };
-
-createServer((req, res) => {
-  let path;
-  try {
-    path = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname);
-  } catch {
-    res.writeHead(400).end('bad request');
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '/', 'http://localhost:8080');
+  let rel = decodeURIComponent(url.pathname);
+  if (rel === '/' || rel.endsWith('/')) rel += 'index.html';
+  const file = join(root, rel);
+  if (!file.startsWith(root) || !existsSync(file)) {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('not found');
     return;
   }
-  if (path.endsWith('/')) path += 'index.html';
-  const file = resolve(join(root, normalize(path)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    res.writeHead(403).end('forbidden');
-    return;
-  }
-  let size;
-  try {
-    const st = statSync(file);
-    if (!st.isFile()) throw new Error('not a file');
-    size = st.size;
-  } catch {
-    res.writeHead(404).end('not found');
-    return;
-  }
-  res.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  createReadStream(file).pipe(res);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`game/ is on http://localhost:${port}`);
+  res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream' });
+  res.end(readFileSync(file));
 });
+server.listen(8080, () => console.log('SOLARA BAY di http://localhost:8080'));

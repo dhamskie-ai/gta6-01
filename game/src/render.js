@@ -1,264 +1,152 @@
-// Renderer three.js: langit aesthetic (gradasi + matahari + bulan +
-// awan + bintang), fog 220–1100 m, lampu, bayangan, partikel/efek.
-import { CFG } from './config.js';
-import { clamp, lerp, mulberry32, rr } from './random.js';
-
-function skyColorsAt(hour) {
-  const stops = CFG.skyStops;
-  let a = stops[0], b = stops[stops.length - 1];
-  for (let i = 0; i < stops.length - 1; i++) {
-    if (hour >= stops[i][0] && hour <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break; }
+// Renderer three.js: langit gradasi, matahari/bulan/bintang, awan berlapis, kabut, bayangan.
+import * as THREE from 'three';
+import { G } from './config.js';
+import { clamp, lerp } from './random.js';
+// Kunci waktu: [jam, skyTop, skyBottom, fog, sunColor, sunI, hemi]
+const KEYS = [
+  [0, 0x0b1026, 0x1c2440, 0x141a2e, 0x8a9ac0, 0.12, 0.35],
+  [6, 0x7a6a9a, 0xffb36b, 0xc98a6a, 0xffb36b, 0.7, 0.6],
+  [9, 0x3f8fd2, 0xbfe3f2, 0xa8c8d8, 0xfff2d8, 1.15, 1.05],
+  [12, 0x2f7fd0, 0x9fd8ef, 0x9fc8dc, 0xffffff, 1.3, 1.15],
+  [16, 0x4a90d9, 0xf2d8a0, 0xd8b88a, 0xffe0a0, 1.2, 1.1],
+  [17.5, 0x7a4a9a, 0xff9a3d, 0xe88a5a, 0xff8f3d, 1.35, 0.9],
+  [18.4, 0x5a2a6e, 0xff6b35, 0xc05a6a, 0xff6b2e, 1.1, 0.75],
+  [19.2, 0x3a1a5e, 0xd94f70, 0x8a3a5e, 0xff7a5a, 0.6, 0.55],
+  [20, 0x141a3a, 0x2a2a55, 0x1c2038, 0x8a9ac0, 0.2, 0.4],
+  [24, 0x0b1026, 0x1c2440, 0x141a2e, 0x8a9ac0, 0.12, 0.35],
+];
+function skyAt(t) {
+  for (let i = 0; i < KEYS.length - 1; i++) {
+    const a = KEYS[i], b = KEYS[i + 1];
+    if (t >= a[0] && t <= b[0]) {
+      const k = (t - a[0]) / (b[0] - a[0] || 1);
+      return { top: new THREE.Color(a[1]).lerp(new THREE.Color(b[1]), k), bot: new THREE.Color(a[2]).lerp(new THREE.Color(b[2]), k), fog: new THREE.Color(a[3]).lerp(new THREE.Color(b[3]), k), sun: new THREE.Color(a[4]).lerp(new THREE.Color(b[4]), k), sunI: lerp(a[5], b[5], k), hemi: lerp(a[6], b[6], k) };
+    }
   }
-  if (hour < stops[0][0]) { a = stops[stops.length - 1]; b = stops[0]; }
-  const span = (b[0] - a[0]) || 1;
-  const t = clamp((hour - a[0]) / span, 0, 1);
-  const mix = (ca, cb) => {
-    const ra = (ca >> 16) & 255, ga = (ca >> 8) & 255, ba = ca & 255;
-    const rb = (cb >> 16) & 255, gb = (cb >> 8) & 255, bb = cb & 255;
-    return ((Math.round(lerp(ra, rb, t)) << 16) | (Math.round(lerp(ga, gb, t)) << 8) | Math.round(lerp(ba, bb, t))) >>> 0;
-  };
-  return { top: mix(a[1], b[1]), horizon: mix(a[2], b[2]), fog: mix(a[3], b[3]) };
+  return { top: new THREE.Color(0x2f7fd0), bot: new THREE.Color(0x9fd8ef), fog: new THREE.Color(0x9fc8dc), sun: new THREE.Color(0xffffff), sunI: 1.2, hemi: 1.1 };
 }
-export function createRenderer(W) {
-  const THREE = W.three;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+function radialTex(inner, outer) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 2, 64, 64, 62);
+  g.addColorStop(0, inner); g.addColorStop(1, outer);
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function skyTex(top, bot) {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#' + top.getHexString()); g.addColorStop(0.55, '#' + bot.getHexString()); g.addColorStop(1, '#' + bot.getHexString());
+  x.fillStyle = g; x.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+export function buildRender() {
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
+  if (new URLSearchParams(location.search).get('noshadow')) renderer.shadowMap.enabled = false;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  document.getElementById('game').appendChild(renderer.domElement);
-  W.renderer = renderer;
+  renderer.toneMappingExposure = 1.12;
+  G.renderer = renderer;
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x8fc3e8, 220, 1100);
-  W.scene = scene;
-  const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2000);
-  camera.position.set(24, 8, 110);
-  W.camera = camera;
-  // Langit: kubah gradasi 3 warna (shader kanvas), matahari, bulan, awan, bintang.
-  const skyCanvas = document.createElement('canvas');
-  skyCanvas.width = 4; skyCanvas.height = 256;
-  const skyTex = new THREE.CanvasTexture(skyCanvas);
-  skyTex.colorSpace = THREE.SRGBColorSpace;
-  const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false });
+  scene.fog = new THREE.Fog(0x9fc8dc, 120, 520);
+  G.scene = scene;
+  const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 1200);
+  camera.position.set(0, 4, 46);
+  G.camera = camera;
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+  // Langit: kubah gradasi + matahari cakram + bulan + bintang + awan berlapis.
+  const skyMat = new THREE.MeshBasicMaterial({ map: skyTex(new THREE.Color(0x2f7fd0), new THREE.Color(0x9fd8ef)), side: THREE.BackSide, fog: false, depthWrite: false });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 16), skyMat);
   scene.add(sky);
-  const sun = new THREE.Mesh(new THREE.CircleGeometry(26, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false }));
-  const sunGlow = new THREE.Mesh(new THREE.CircleGeometry(60, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffc86a, transparent: true, opacity: 0.35, fog: false }));
-  scene.add(sun); scene.add(sunGlow);
-  const moon = new THREE.Mesh(new THREE.CircleGeometry(18, 32),
-    new THREE.MeshBasicMaterial({ color: 0xe8ecf5, fog: false }));
-  scene.add(moon);
-  // Awan: tekstur 256 px bergambar gumpalan berlapis + mesh bola.
-  const cloudTex = new THREE.CanvasTexture((() => {
-    const c = document.createElement('canvas');
-    c.width = 256; c.height = 256;
-    const g = c.getContext('2d');
-    for (let i = 0; i < 26; i++) {
-      const x = 30 + Math.random() * 196, y = 90 + Math.random() * 76, r = 18 + Math.random() * 42;
-      const grad = g.createRadialGradient(x, y, 2, x, y, r);
-      grad.addColorStop(0, 'rgba(255,255,255,.85)');
-      grad.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = grad;
-      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
-    }
-    return c;
-  })());
-  cloudTex.colorSpace = THREE.SRGBColorSpace;
-  const clouds = [];
-  const rng = mulberry32(W.seed + 13);
-  for (let i = 0; i < 14; i++) {
-    const puff = new THREE.Group();
-    for (let j = 0; j < 4; j++) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(rr(rng, 9, 18), 10, 8),
-        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, fog: false }));
-      s.position.set(rr(rng, -18, 18), rr(rng, -3, 3), rr(rng, -6, 6));
-      s.scale.y = 0.45;
-      puff.add(s);
-    }
-    puff.position.set(rr(rng, -500, 500), rr(rng, 130, 220), rr(rng, -500, 500));
-    scene.add(puff);
-    clouds.push(puff);
-  }
-  // Bintang malam: titik-titik tajam.
+  G.skyMat = skyMat;
+  const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTex('rgba(255,240,190,1)', 'rgba(255,140,40,0)'), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  sunSprite.scale.setScalar(180); scene.add(sunSprite); G.sunSprite = sunSprite;
+  const sunDisc = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTex('rgba(255,255,230,1)', 'rgba(255,200,80,0)'), transparent: true, depthWrite: false, fog: false }));
+  sunDisc.scale.setScalar(46); scene.add(sunDisc); G.sunDisc = sunDisc;
+  const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTex('rgba(235,240,255,1)', 'rgba(180,190,230,0)'), transparent: true, depthWrite: false, fog: false }));
+  moonSprite.scale.setScalar(34); scene.add(moonSprite); G.moonSprite = moonSprite;
+  // Bintang: 500 titik, lebih jelas saat malam.
   const starGeo = new THREE.BufferGeometry();
-  const starPos = [];
-  for (let i = 0; i < 420; i++) {
-    const a = rng() * Math.PI * 2, e = rr(rng, 0.15, 1.4), r = 850;
-    starPos.push(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r);
+  const pos = new Float32Array(500 * 3);
+  for (let i = 0; i < 500; i++) {
+    const a = Math.random() * Math.PI * 2, e = Math.random() * Math.PI * 0.45 + 0.08;
+    pos[i * 3] = Math.cos(a) * Math.cos(e) * 850; pos[i * 3 + 1] = Math.sin(e) * 850; pos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * 850;
   }
-  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, fog: false }));
-  scene.add(stars);
-  // Lampu: matahari directional + hemisphere + lampu depan.
-  const sunLight = new THREE.DirectionalLight(0xfff2d8, 2.4);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(2048, 2048);
-  sunLight.shadow.camera.left = -160; sunLight.shadow.camera.right = 160;
-  sunLight.shadow.camera.top = 160; sunLight.shadow.camera.bottom = -160;
-  sunLight.shadow.camera.far = 700;
-  scene.add(sunLight);
-  scene.add(sunLight.target);
-  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x8a7a5a, 0.9);
-  scene.add(hemi);
-  const headlight = new THREE.SpotLight(0xfff2c0, 0, 60, 0.5, 0.4);
-  scene.add(headlight);
-  scene.add(headlight.target);
-  // Partikel: satu Points pool untuk asap / ledakan / cipratan.
-  const P_COUNT = 320;
-  const pGeo = new THREE.BufferGeometry();
-  const pPos = new Float32Array(P_COUNT * 3);
-  const pCol = new Float32Array(P_COUNT * 3);
-  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-  pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
-  const points = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.9 }));
-  points.frustumCulled = false;
-  scene.add(points);
-  const parts = [];
-  for (let i = 0; i < P_COUNT; i++) parts.push({ life: 0, x: 0, y: -99, z: 0, vx: 0, vy: 0, vz: 0, r: 1, g: 1, b: 1 });
-  const tracers = [];
-  const tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9 });
-  const E = {
-    spawn(x, y, z, vx, vy, vz, life, r, g, b) {
-      const p = parts.find((q) => q.life <= 0);
-      if (!p) return;
-      p.life = life; p.x = x; p.y = y; p.z = z; p.vx = vx; p.vy = vy; p.vz = vz; p.r = r; p.g = g; p.b = b;
-    },
-    spawnSmoke(x, z, n = 1) {
-      for (let i = 0; i < n; i++) E.spawn(x + rr(Math.random, -0.5, 0.5), 1 + Math.random(), z + rr(Math.random, -0.5, 0.5), rr(Math.random, -0.4, 0.4), rr(Math.random, 0.8, 1.6), rr(Math.random, -0.4, 0.4), rr(Math.random, 0.8, 1.4), 0.45, 0.45, 0.48);
-    },
-    explode(x, z) {
-      for (let i = 0; i < 26; i++) {
-        const a = Math.random() * Math.PI * 2, sp = rr(Math.random, 2, 9);
-        E.spawn(x, 1, z, Math.cos(a) * sp, rr(Math.random, 2, 8), Math.sin(a) * sp, rr(Math.random, 0.5, 1.1), 1, 0.55 + Math.random() * 0.3, 0.12);
-      }
-      for (let i = 0; i < 10; i++) E.spawn(x, 1, z, rr(Math.random, -1, 1), rr(Math.random, 1, 3), rr(Math.random, -1, 1), rr(Math.random, 1.2, 2), 0.25, 0.25, 0.28);
-    },
-    puff(x, y, z, color) {
-      const r = ((color >> 16) & 255) / 255, g = ((color >> 8) & 255) / 255, b = (color & 255) / 255;
-      for (let i = 0; i < 6; i++) E.spawn(x, y, z, rr(Math.random, -1.5, 1.5), rr(Math.random, -0.5, 1.5), rr(Math.random, -1.5, 1.5), 0.5, r, g, b);
-    },
-    tracer(x1, y1, z1, x2, y2, z2) {
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2),
-      ]);
-      const line = new THREE.Line(geo, tracerMat.clone());
-      scene.add(line);
-      tracers.push({ line, life: 0.12 });
-    },
-    muzzle(x, y, z) {
-      E.spawn(x, y, z, 0, 0, 0, 0.08, 1, 0.9, 0.4);
-      E.spawn(x, y, z, 0.5, 0.3, 0, 0.08, 1, 0.75, 0.3);
-    },
-    update(dt) {
-      for (let i = 0; i < P_COUNT; i++) {
-        const p = parts[i];
-        if (p.life > 0) {
-          p.life -= dt;
-          p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-          p.vy -= 1.5 * dt;
-        } else { p.y = -99; }
-        pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
-        pCol[i * 3] = p.r; pCol[i * 3 + 1] = p.g; pCol[i * 3 + 2] = p.b;
-      }
-      pGeo.attributes.position.needsUpdate = true;
-      pGeo.attributes.color.needsUpdate = true;
-      for (let i = tracers.length - 1; i >= 0; i--) {
-        tracers[i].life -= dt;
-        if (tracers[i].life <= 0) {
-          scene.remove(tracers[i].line);
-          tracers[i].line.geometry.dispose();
-          tracers.splice(i, 1);
-        }
-      }
-    },
-  };
-  W.effects = E;
-  W.render = {
-    sky, skyCanvas, skyTex, sun, sunGlow, moon, clouds, stars,
-    sunLight, hemi, headlight, renderer, camera,
-  };
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-  return W.render;
+  starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false }));
+  scene.add(stars); G.stars = stars;
+  // Awan: 12 sprite lembut, 3 lapis ketinggian, melayang pelan.
+  const cloudTex = radialTex('rgba(255,255,255,0.85)', 'rgba(255,255,255,0)');
+  G.clouds = [];
+  for (let i = 0; i < 12; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
+    const sc = 60 + Math.random() * 90;
+    s.scale.set(sc, sc * 0.32, 1);
+    s.position.set(Math.random() * 800 - 400, 110 + (i % 3) * 30, Math.random() * 800 - 400);
+    s.userData = { sp: 1 + Math.random() * 2 };
+    scene.add(s); G.clouds.push(s);
+  }
+  // Cahaya: matahari directional + bayangan + hemi.
+  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+  sun.position.set(120, 180, 60); sun.castShadow = true;
+  sun.shadow.mapSize.set(512, 512);
+  sun.shadow.camera.left = -160; sun.shadow.camera.right = 160;
+  sun.shadow.camera.top = 160; sun.shadow.camera.bottom = -160;
+  sun.shadow.camera.far = 600;
+  scene.add(sun); scene.add(sun.target); G.sun = sun;
+  const hemi = new THREE.HemisphereLight(0xbdd8ff, 0x5a4a3a, 1.1);
+  scene.add(hemi); G.hemi = hemi;
+  // Satu sorot lampu depan bersama untuk mobil pemain (malam hari).
+  const headlight = new THREE.SpotLight(0xffe9a0, 0, 30, 0.55, 0.5, 1.2);
+  scene.add(headlight); scene.add(headlight.target); G.headlight = headlight;
+  return { renderer, scene, camera };
 }
-export function updateSky(W, dt) {
-  const R = W.render;
-  const hour = W.hour;
-  const cols = skyColorsAt(hour);
-  // Gradasi kubah: gambar ulang strip vertikal 4 px.
-  const g = R.skyCanvas.getContext('2d');
-  const top = `#${cols.top.toString(16).padStart(6, '0')}`;
-  const hor = `#${cols.horizon.toString(16).padStart(6, '0')}`;
-  const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, top); grad.addColorStop(0.55, hor); grad.addColorStop(1, hor);
-  g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
-  R.skyTex.needsUpdate = true;
-  R.sky.material.color.setHex(0xffffff);
-  W.scene.fog.color.setHex(cols.fog);
-  // Matahari / bulan mengikuti jam.
-  const sunAngle = ((hour - 6) / 12) * Math.PI; // 06:00 terbit, 18:00 terbenam
-  const sx = Math.cos(sunAngle) * 800, sy = Math.sin(sunAngle) * 700 + 40;
-  R.sun.position.set(sx, Math.max(30, sy), -500);
-  R.sunGlow.position.copy(R.sun.position);
-  R.sunGlow.position.z += 2;
-  const moonAngle = ((hour - 18) / 12) * Math.PI;
-  R.moon.position.set(Math.cos(moonAngle) * 800, Math.max(60, Math.sin(moonAngle) * 600 + 80), -500);
-  const isDay = hour >= 6 && hour < 18.5;
-  R.sun.visible = isDay; R.sunGlow.visible = isDay;
-  R.moon.visible = !isDay;
-  R.stars.visible = !isDay;
-  R.stars.material.opacity = isDay ? 0 : 1;
-  // Cahaya matahari: siang terang, senja oranye, malam redup.
-  const dayF = isDay ? clamp(Math.sin(sunAngle), 0.25, 1) : 0.12;
-  R.sunLight.intensity = 0.5 + dayF * 1.9;
-  R.sunLight.color.setHex(hour >= 17 && hour < 19 ? 0xffb36a : hour < 7 ? 0xffc98a : 0xfff2d8);
-  R.sunLight.position.set(sx * 0.4, Math.max(120, sy * 0.6), -200);
-  const px = W.player.car ? W.player.car.x : W.player.x;
-  const pz = W.player.car ? W.player.car.z : W.player.z;
-  R.sunLight.target.position.set(px, 0, pz);
-  R.hemi.intensity = isDay ? 0.9 : 0.35;
-  // Awan bergerak pelan.
-  for (const c of R.clouds) {
-    c.position.x += dt * 1.6;
-    if (c.position.x > 560) c.position.x = -560;
+export function updateSky(dt) {
+  const t = G.timeOfDay;
+  const k = skyAt(t);
+  // Gradasi langit: buat ulang tekstur hanya saat bucket waktu berubah (hemat GPU).
+  const bucket = Math.floor(t * 4);
+  if (bucket !== updateSky._bucket) {
+    updateSky._bucket = bucket;
+    if (G.skyMat.map) G.skyMat.map.dispose();
+    G.skyMat.map = skyTex(k.top, k.bot);
   }
-  // Lampu jalan + lampu depan menyala malam.
-  const night = !isDay;
-  for (const lamp of W.city.lamps) {
-    lamp.material.emissive.setHex(night ? 0xFFD98A : 0x000000);
+  const night = t < 5.5 || t > 19.6 ? 1 : t > 18.6 ? (t - 18.6) : t < 6.5 ? (6.5 - t) : 0;
+  G.nightF = clamp(night, 0, 1);
+  const sunset = t > 16.5 && t < 19.5 ? Math.sin((t - 16.5) / 3 * Math.PI) : 0;
+  G.sunsetF = sunset;
+  G.scene.fog.color.copy(k.fog);
+  G.sun.color.copy(k.sun); G.sun.intensity = k.sunI;
+  G.hemi.intensity = k.hemi;
+  // Matahari terbenam di barat (x negatif), bulan berlawanan.
+  const ang = ((t - 6) / 12) * Math.PI;
+  const sx = -Math.cos(ang) * 700, sy = Math.sin(ang) * 500 + 40, sz = -180;
+  G.sunSprite.position.set(sx, sy, sz);
+  G.sunDisc.position.set(sx, sy, sz);
+  G.sunSprite.material.opacity = t > 5 && t < 20 ? 0.22 + sunset * 0.68 : 0;
+  G.sunDisc.material.opacity = t > 5 && t < 20 ? 0.9 : 0;
+  G.sunSprite.scale.setScalar(180 + sunset * 90);
+  G.sun.position.set(sx * 0.4, Math.max(30, sy * 0.4), sz * 0.4);
+  G.moonSprite.position.set(-sx, 320, -sz);
+  G.moonSprite.material.opacity = G.nightF;
+  G.stars.material.opacity = G.nightF * 0.95;
+  // Awan: warna senja saat golden hour, melayang.
+  for (const c of G.clouds) {
+    c.position.x += c.userData.sp * dt;
+    if (c.position.x > 450) c.position.x = -450;
+    c.material.opacity = 0.16 + (1 - G.nightF) * 0.4;
+    c.material.color.setHex(sunset > 0.4 ? 0xffb38a : 0xffffff);
   }
-  for (const tl of W.city.trafficLights) {
-    tl.t += dt;
-    const phase = Math.floor(tl.t) % 2;
-    tl.bulbs[0].material.color.setHex(phase === 0 ? 0xff2a2a : 0x551111);
-    tl.bulbs[2].material.color.setHex(phase === 0 ? 0x115511 : 0x2aff5a);
+  // Siklus hari.
+  if (G.state === 'playing' && !G.paused) {
+    G.timeOfDay += dt * 0.02; // 1 menit game ~ 0.8 detik nyata? (pelan: 50 menit/hari-jam)
+    if (G.timeOfDay >= 24) { G.timeOfDay -= 24; G.day++; }
   }
-  // Mercusuar berputar + kincir ria berputar.
-  if (W.city.lighthouseBeam) W.city.lighthouseBeam.rotation.y += dt * 0.5;
-  if (W.city.ferrisWheel) W.city.ferrisWheel.rotation.z += dt * 0.12;
-  if (W.city.seaTex) W.city.seaTex.offset.y -= dt * 0.01;
-  // Lampu depan mobil pemain.
-  const car = W.player.car;
-  if (car && night) {
-    R.headlight.intensity = 120;
-    const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    R.headlight.position.set(car.x + fx * 2, 1.2, car.z + fz * 2);
-    R.headlight.target.position.set(car.x + fx * 30, 0, car.z + fz * 30);
-  } else R.headlight.intensity = 0;
-  // Radio ganti lagu tiap 45 detik.
-  if (Math.floor(W.elapsed / 45) !== Math.floor((W.elapsed - dt) / 45)) {
-    W.radioTrack = (W.radioTrack + 1) % CFG.radioTracks.length;
-  }
-}
-export function renderFrame(W) {
-  W.effects.update(1 / 60);
-  W.renderer.render(W.scene, W.camera);
 }
