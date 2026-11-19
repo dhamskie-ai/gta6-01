@@ -1,186 +1,191 @@
-// Combat: tinju, senjata, musuh, health/armor, pickup.
+import * as THREE from 'three';
 import { WEAPONS } from './config.js';
-import { clamp, dist2 } from './random.js';
-import { damagePlayer } from './vehicles.js';
+import { createPersonMesh } from './player.js';
+import { addWanted } from './police.js';
+import { wasPressed, wasClicked, isMouseDown } from './input.js';
 
 export function initCombat(G) {
-  G.weapons = {};
-  for (const [k, w] of Object.entries(WEAPONS)) {
-    G.weapons[k] = { ...w, ammo: w.ammo, mag: w.ammo };
-  }
-  G.weapon = 1;
-  G.shootCd = 0; G.reloadT = 0;
+  G.ammo = { vesper: 72, mako: 150, breaker: 0 };
+  G.owned = { breaker: false };
+  G.weapon = 2; // MAKO default (HUD shows MAKO 150)
+  G.fireCd = 0;
   G.enemies = [];
-  G.pickups = [];
+  G._kills = 0;
 }
 
-export function switchWeapon(G, n) {
-  const w = G.weapons[n];
-  if (!w) return;
-  if (w.locked && !w.owned) { G.hud.ticker('KESTREL terkunci — selesaikan misi 7 dulu.'); return; }
-  if (!w.owned) {
-    if (G.cash >= w.price) {
-      G.cash -= w.price; w.owned = true;
-      G.hud.ticker(w.name + ' dibeli — $' + w.price.toLocaleString('en-US'));
-      G.audio.jingle();
-    } else {
-      G.hud.ticker(w.name + ' butuh $' + w.price.toLocaleString('en-US') + ' — uang kurang.');
-      return;
-    }
+export function currentWeapon(G) { return WEAPONS[G.weapon]; }
+
+export function damagePlayer(G, n) {
+  if (G.phase !== 'play') return;
+  let rest = n;
+  if (G.armor > 0) {
+    const absorbed = Math.min(G.armor, rest * 0.6);
+    G.armor -= absorbed;
+    rest -= absorbed;
   }
-  G.weapon = n;
-  G.audio.click();
+  G.health -= rest;
+  if (G.health <= 0) {
+    G.health = 0;
+    G.phase = 'dead';
+    G.audio.busted();
+    G.audio.siren(false);
+    G.audio.engine(false, 0);
+  }
 }
 
-export function spawnGuard(G, THREE, x, z) {
-  const mesh = makeGuardMesh(THREE);
+export function spawnGuard(G, x, z) {
+  const mesh = createPersonMesh({ shirt: 0x8a2a2a, pants: 0x22262c, skin: 0xc98d64, hair: 0x14100c });
   mesh.position.set(x, 0, z);
-  G.scene.add(mesh);
-  const g = { mesh, x, z, yaw: 0, hp: 50, speed: 2.6, shootCd: 1.5, dead: false };
+  G.W.scene.add(mesh);
+  const g = { mesh, x, z, hp: 60, shootCd: 1 + Math.random(), walkPhase: Math.random() * 6, kind: 'guard' };
   G.enemies.push(g);
   return g;
 }
 
-function makeGuardMesh(THREE) {
-  const g = new THREE.Group();
-  const suit = new THREE.MeshLambertMaterial({ color: 0x3a3f4a });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.05, 0.4), suit);
-  body.position.y = 1.05; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), skin);
-  head.position.y = 1.82; g.add(head);
-  const shade = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.12),
-    new THREE.MeshLambertMaterial({ color: 0x11151c }));
-  shade.position.set(0, 1.86, 0.24); g.add(shade);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.85, 0.24), suit);
-  legL.position.set(-0.17, 0.42, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.17; g.add(legR);
-  g.userData = { legL, legR };
-  return g;
+function muzzleWorldPos(G) {
+  const p = G.player;
+  const fx = Math.sin(p.camYaw), fz = Math.cos(p.camYaw);
+  return { x: p.x + fx * 1.1, y: p.y + 1.45, z: p.z + fz * 1.1 };
 }
 
-export function spawnPickups(G, THREE, city) {
-  const spots = [
-    { kind: 'health', x: 60, z: 120 }, { kind: 'armor', x: -60, z: -120 },
-    { kind: 'health', x: 180, z: 0 }, { kind: 'armor', x: -180, z: 180 },
-    { kind: 'health', x: -240, z: 30 }, { kind: 'armor', x: 120, z: 180 },
-  ];
-  for (const s of spots) {
-    const color = s.kind === 'health' ? 0x2aff5e : 0x37e0ff;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8),
-      new THREE.MeshBasicMaterial({ color }));
-    m.position.set(s.x, 1, s.z);
-    G.scene.add(m);
-    G.pickups.push({ ...s, mesh: m, taken: false });
+function shootAt(G, from, dirX, dirY, dirZ, range, damage, spread) {
+  const targets = [];
+  for (const e of G.enemies) targets.push({ x: e.x, y: 1.2, z: e.z, r: 1.0, ref: e, kind: 'enemy' });
+  for (const fp of G.footPolice) targets.push({ x: fp.x, y: 1.2, z: fp.z, r: 1.0, ref: fp, kind: 'cop' });
+  for (const p of G.peds) targets.push({ x: p.x, y: 1.1, z: p.z, r: 0.9, ref: p, kind: 'ped' });
+  let best = null, bestT = range;
+  for (const t of targets) {
+    const dx = t.x - from.x, dy = t.y - from.y, dz = t.z - from.z;
+    const proj = dx * dirX + dy * dirY + dz * dirZ;
+    if (proj < 0 || proj > range) continue;
+    const px = from.x + dirX * proj, py = from.y + dirY * proj, pz = from.z + dirZ * proj;
+    const miss = Math.hypot(t.x - px, t.y - py, t.z - pz);
+    if (miss < t.r + spread && proj < bestT) { bestT = proj; best = t; }
   }
-}
-
-function nearestTarget(G, maxD) {
-  const px = G.player.x, pz = G.player.z;
-  let best = null, bd = maxD * maxD;
-  const consider = (t) => {
-    if (t.dead || t.hp <= 0) return;
-    const d2 = dist2(t.x, t.z, px, pz);
-    if (d2 < bd) { bd = d2; best = t; }
+  const end = {
+    x: from.x + dirX * (best ? bestT : range),
+    y: from.y + dirY * (best ? bestT : range),
+    z: from.z + dirZ * (best ? bestT : range),
   };
-  for (const e of G.enemies) consider(e);
-  for (const c of G.footCops) consider(c);
+  G.W.spawnTracer(from, end);
+  if (!best) return null;
+  if (best.kind === 'enemy') {
+    best.ref.hp -= damage;
+    G.W.spawnParticles({ x: best.x, y: 1.2, z: best.z }, 0xff5040, 6, 1.4, 1.2);
+    if (best.ref.hp <= 0) {
+      G.W.spawnParticles({ x: best.x, y: 1, z: best.z }, 0xff5040, 18, 2.2, 1.6);
+      G.W.scene.remove(best.ref.mesh);
+      G.enemies = G.enemies.filter((e) => e !== best.ref);
+      G._kills++;
+    }
+  } else if (best.kind === 'cop') {
+    best.ref.hp -= damage;
+    if (best.ref.hp <= 0) {
+      G.W.spawnParticles({ x: best.x, y: 1, z: best.z }, 0xff5040, 14, 2, 1.5);
+      G.W.scene.remove(best.ref.mesh);
+      G.footPolice = G.footPolice.filter((f) => f !== best.ref);
+      G._kills++;
+    }
+  } else if (best.kind === 'ped') {
+    best.ref.hp -= damage;
+    G._panic = 6;
+    if (best.ref.hp <= 0) {
+      G.W.spawnParticles({ x: best.x, y: 1, z: best.z }, 0xff5040, 10, 1.6, 1.2);
+      G.W.scene.remove(best.ref.mesh.group);
+      G.peds = G.peds.filter((pp) => pp !== best.ref);
+    }
+  }
   return best;
 }
 
-export function updateCombat(G, dt, input, camera) {
-  G.shootCd -= dt;
-  if (G.reloadT > 0) {
-    G.reloadT -= dt;
-    if (G.reloadT <= 0) {
-      const w = G.weapons[G.weapon];
-      w.mag = w.ammo;
-      G.hud.ticker(w.name + ' terisi ulang.');
-    }
-  }
-  const w = G.weapons[G.weapon];
-  const firing = input.clicked || (w.auto && input.keys.has('Mouse0'));
-  if (firing && G.shootCd <= 0 && G.reloadT <= 0 && G.phase === 'play') {
-    if (G.weapon === 1) {
-      const t = nearestTarget(G, 2.4);
-      G.audio.punch();
-      G.shootCd = w.rate;
-      if (t) {
-        t.hp -= w.dmg;
-        G.renderFx.burst(t.x, 1.4, t.z, 0xff5a5a, 6);
-        if (t.hp <= 0) killTarget(G, t);
-      }
-    } else if (w.mag > 0) {
-      w.mag -= 1;
-      G.audio.shot();
-      G.shootCd = w.rate;
-      G.fleeUntil = performance.now() + 2500;
-      const t = nearestTarget(G, 60);
-      const from = { x: G.player.x, y: 1.5, z: G.player.z };
-      let to = null;
-      if (t) {
-        const d = Math.sqrt(dist2(t.x, t.z, G.player.x, G.player.z)) || 1;
-        to = { x: t.x, y: 1.4, z: t.z };
-        t.hp -= w.dmg;
-        G.renderFx.burst(t.x, 1.4, t.z, 0xff5a5a, 8);
-        if (t.hp <= 0) killTarget(G, t);
-      } else {
-        const yaw = G.player.inCar ? G.playerCar.yaw : G.player.yaw;
-        to = { x: G.player.x + Math.sin(yaw) * 40, y: 1.4, z: G.player.z + Math.cos(yaw) * 40 };
-      }
-      G.renderFx.tracer(from, to);
-      G.renderFx.muzzle(from);
-      if (w.mag === 0) G.hud.ticker(w.name + ' kosong — tekan R.');
-    } else {
+export function updateCombat(G, input, dt) {
+  if (G.phase !== 'play' || G.inCar) { G.fireCd -= dt; return; }
+  G.fireCd -= dt;
+  for (let i = 0; i < 5; i++) {
+    if (wasPressed(input, 'Digit' + (i + 1))) {
+      const w = WEAPONS[i];
+      if (w.locked) { if (G.hud) G.hud.toast(`${w.name} LOCKED`); continue; }
+      if (w.id === 'breaker' && !G.owned.breaker) { if (G.hud) G.hud.toast('BREAKER — beli di CAL’S GUNS ($3,800)'); continue; }
+      G.weapon = i;
       G.audio.click();
-      G.shootCd = 0.3;
     }
   }
-  // musuh: kejar + tembak
-  for (const e of G.enemies) {
-    if (e.dead) continue;
-    const dx = G.player.x - e.x, dz = G.player.z - e.z;
-    const d = Math.sqrt(dx * dx + dz * dz) || 1;
-    e.yaw = Math.atan2(dx, dz);
-    if (d > 8) { e.x += Math.sin(e.yaw) * e.speed * dt; e.z += Math.cos(e.yaw) * e.speed * dt; }
-    e.shootCd -= dt;
-    if (d < 26 && e.shootCd <= 0) {
-      e.shootCd = 1.6;
-      G.audio.shot();
-      if (!G.shotMode && Math.random() < 0.4) damagePlayer(G, 6);
-      G.renderFx.tracer({ x: e.x, y: 1.5, z: e.z }, { x: G.player.x, y: 1.4, z: G.player.z });
-    }
-    e.mesh.position.set(e.x, 0, e.z);
-    e.mesh.rotation.y = e.yaw;
-    const sw = Math.sin(performance.now() / 180 + e.x) * 0.4;
-    e.mesh.userData.legL.rotation.x = sw;
-    e.mesh.userData.legR.rotation.x = -sw;
-  }
-  // pickup
-  for (const p of G.pickups) {
-    if (p.taken) continue;
-    p.mesh.rotation.y += dt * 2;
-    const d2 = dist2(p.x, p.z, G.player.x, G.player.z);
-    if (d2 < 2.2 * 2.2) {
-      p.taken = true; p.mesh.visible = false;
-      if (p.kind === 'health') { G.health = clamp(G.health + 40, 0, 100); G.hud.ticker('Health +40'); }
-      else { G.armor = clamp(G.armor + 50, 0, 100); G.hud.ticker('Armor +50'); }
-      G.audio.jingle();
+  if (wasPressed(input, 'KeyR')) {
+    const w = currentWeapon(G);
+    if (w.id !== 'fists' && G.ammo[w.id] <= 0 && (G.spare || 0) > 0) {
+      const give = Math.min(30, G.spare);
+      G.ammo[w.id] += give; G.spare -= give;
+      if (G.hud) G.hud.toast(`Reload ${w.name} +${give}`);
     }
   }
-  // asap mobil rusak
-  for (const car of G.cars) {
-    if (!car.isPlayer || car.dead) continue;
-    if (car.hp < car.maxHp * 0.4 && Math.random() < dt * 6) {
-      G.renderFx.burst(car.x, 1.2, car.z, 0x666666, 3);
+  const w = currentWeapon(G);
+  const p = G.player;
+  if (w.id === 'fists') {
+    if (wasClicked(input, 0) && G.fireCd <= 0) {
+      G.fireCd = 0.4;
+      G.audio.punch();
+      const fx = Math.sin(p.camYaw), fz = Math.cos(p.camYaw);
+      let hit = false;
+      for (const e of G.enemies) {
+        if (Math.hypot(e.x - p.x, e.z - p.z) < 2.4) { e.hp -= 14; hit = true; }
+      }
+      for (const fp of G.footPolice) {
+        if (Math.hypot(fp.x - p.x, fp.z - p.z) < 2.4) { fp.hp -= 14; hit = true; }
+      }
+      if (hit) G.W.spawnParticles({ x: p.x + fx, y: 1.2, z: p.z + fz }, 0xffffff, 4, 0.8, 0.8);
     }
+    return;
+  }
+  const cd = w.id === 'mako' ? 0.09 : w.id === 'breaker' ? 0.7 : 0.28;
+  const wantFire = w.id === 'mako' ? isMouseDown(input, 0) : wasClicked(input, 0);
+  if (wantFire && G.fireCd <= 0) {
+    if (G.ammo[w.id] <= 0) {
+      if (G.hud) G.hud.toast(`${w.name} — AMMO HABIS`);
+      G.audio.click();
+      G.fireCd = 0.3;
+      return;
+    }
+    G.fireCd = cd;
+    G.ammo[w.id]--;
+    G.audio.shot(w.id);
+    const from = muzzleWorldPos(G);
+    G.W.muzzleFlash(from);
+    const cam = G.W.camera;
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const spread = w.id === 'mako' ? 0.35 : w.id === 'breaker' ? 0.15 : 0.25;
+    const hit = shootAt(G, from, dir.x, dir.y, dir.z, 70, w.id === 'breaker' ? 55 : w.id === 'mako' ? 16 : 26, spread);
+    if (hit && hit.kind === 'ped') addWanted(G, 1, 'Wanted +1 — warga tertembak');
+    if (hit && hit.kind === 'cop') addWanted(G, 2, 'Wanted +2 — polisi tertembak');
+    p.camPitch = Math.min(0.55, p.camPitch + 0.012);
   }
 }
 
-function killTarget(G, t) {
-  t.dead = true;
-  G.renderFx.burst(t.x, 1.2, t.z, 0xff5a5a, 14);
-  if (t.mesh) t.mesh.visible = false;
-  G.stats.kills = (G.stats.kills || 0) + 1;
-  if (G.mission && G.mission.onKill) G.mission.onKill(G, t);
+export function updateEnemies(G, dt) {
+  for (const e of [...G.enemies]) {
+    const dx = G.player.x - e.x, dz = G.player.z - e.z;
+    const d = Math.hypot(dx, dz) || 1;
+    if (d < 42 && d > 16) {
+      e.x += (dx / d) * 4.2 * dt;
+      e.z += (dz / d) * 4.2 * dt;
+      e.walkPhase += dt * 10;
+      const swing = Math.sin(e.walkPhase) * 0.5;
+      e.mesh.userData.legL.rotation.x = swing;
+      e.mesh.userData.legR.rotation.x = -swing;
+    }
+    e.mesh.position.set(e.x, 0, e.z);
+    e.mesh.rotation.y = Math.atan2(dx, dz);
+    e.shootCd -= dt;
+    if (e.shootCd <= 0 && d < 38 && G.phase === 'play') {
+      e.shootCd = 1.7;
+      G.audio.shot('vesper');
+      const from = { x: e.x, y: 1.4, z: e.z };
+      const to = G.inCar && G.car ? { x: G.car.x, y: 1, z: G.car.z } : { x: G.player.x, y: 1.3, z: G.player.z };
+      G.W.spawnTracer(from, to);
+      if (Math.random() < 0.4) {
+        if (G.inCar && G.car) G.car.hp = Math.max(0, G.car.hp - 4);
+        else damagePlayer(G, 7);
+      }
+    }
+  }
 }

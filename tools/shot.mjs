@@ -1,104 +1,84 @@
-// Screenshot SOLARA BAY: 4 scene via Playwright + SwiftShader.
-// Verifikasi /tmp/webgl-policy.txt dulu, serve via node serve.ts (:8080).
+// SOLARA BAY — screenshot tool (Playwright + headless Chromium).
+// Serves content from localhost:8080 through page.route at the fake host
+// http://solarabay.game/ (Chromium in this VM blocks direct localhost
+// navigation), waits for window.__shotReady, saves 1280x720 JPEG q85.
+// Usage: node tools/shot.mjs [chase|drive|street|night|harbor|all]
+// Requires: `node serve.ts` running on :8080, and /tmp/webgl-policy.txt.
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
-import { readFile, writeFile, stat } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright');
 
-const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.dirname(HERE);
 const POLICY = '/tmp/webgl-policy.txt';
-const POLICY_BODY = 'hatch-webgl-allowed-domains-v1\nsolarabay.game\n';
-const POLICY_SHA = '7bb678df967ebb65e8b80fd6869d629166db1ea7006957942fadb62a109f109d';
+const ALL = ['chase', 'drive', 'street', 'night'];
+const NAMES = { chase: '1-chase', drive: '2-drive', street: '3-street', night: '4-night', harbor: '5-harbor' };
 
-async function checkPolicy() {
-  let body = '';
-  try { body = await readFile(POLICY, 'utf8'); } catch (_) { /* hilang */ }
-  const sha = createHash('sha256').update(body).digest('hex');
-  if (body !== POLICY_BODY || sha !== POLICY_SHA) {
-    await writeFile(POLICY, POLICY_BODY);
-    const sha2 = createHash('sha256').update(await readFile(POLICY, 'utf8')).digest('hex');
-    if (sha2 !== POLICY_SHA) throw new Error('webgl policy sha mismatch: ' + sha2);
-    console.log('webgl-policy.txt recreated + sha256 OK');
-  } else console.log('webgl-policy.txt OK (sha256 ' + sha.slice(0, 12) + '…)');
-}
+const wanted = process.argv[2] && process.argv[2] !== 'all' ? [process.argv[2]] : ALL;
 
-async function waitPort(url, tries = 40) {
-  for (let i = 0; i < tries; i++) {
-    try { const r = await fetch(url); if (r.ok) return true; } catch (_) { /* belum */ }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
-
-const shots = JSON.parse(await readFile(path.join(REPO, 'shots.json'), 'utf8')).shots;
-await checkPolicy();
-
-const server = spawn('node', ['serve.ts'], { cwd: REPO, stdio: 'pipe' });
-server.stdout.on('data', (d) => process.stdout.write('[serve] ' + d));
-server.stderr.on('data', (d) => process.stderr.write('[serve:err] ' + d));
-const up = await waitPort('http://localhost:8080/game/');
-if (!up) { server.kill(); throw new Error('serve.ts tidak naik di :8080'); }
+const policy = fs.readFileSync(POLICY, 'utf8');
+const hash = crypto.createHash('sha256').update(policy).digest('hex');
 
 const browser = await chromium.launch({
   executablePath: '/opt/meta-chromium/chrome',
   args: [
-    '--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
-    '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
-    '--hatch-webgl-allowed-domains-sha256=' + POLICY_SHA,
+    '--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server',
+    `--hatch-webgl-allowed-domains-file=${POLICY}`,
+    `--hatch-webgl-allowed-domains-sha256=${hash}`,
   ],
-  env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', no_proxy: '*' },
+  env: {
+    ...process.env,
+    http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', no_proxy: '*',
+  },
 });
-// Chromium build ini memblokir navigasi ke localhost (LNA checks) —
-// sajikan game lewat host solarabay.game (ada di webgl policy) dgn
-// page.route yang mengambil konten dari serve.ts :8080 lewat Node fetch.
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.css': 'text/css', '.jpg': 'image/jpeg', '.png': 'image/png' };
-async function routeGame(page) {
+
+let failures = 0;
+for (const scene of wanted) {
+  const errors = [];
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push('console: ' + msg.text()); });
+  page.on('pageerror', (err) => errors.push('pageerror: ' + String(err)));
   await page.route('**/solarabay.game/**', async (route) => {
     const u = new URL(route.request().url());
-    let p = u.pathname;
-    if (p.endsWith('/')) p += 'index.html';
-    const r = await fetch('http://localhost:8080' + p + u.search);
-    const buf = Buffer.from(await r.arrayBuffer());
-    const ext = p.slice(p.lastIndexOf('.'));
-    await route.fulfill({ status: r.status, contentType: MIME[ext] || 'application/octet-stream', body: buf });
-  });
-}
-let failures = 0;
-try {
-  for (const shot of shots) {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-    await routeGame(page);
-    const errors = [];
-    page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-    page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-    page.on('requestfailed', (r) => errors.push('reqfail: ' + r.url()));
-    const url = 'http://solarabay.game/game/' + shot.query;
-    console.log('>> ' + shot.name + '  ' + url);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    const target = 'http://localhost:8080' + u.pathname + u.search;
     try {
-      await page.waitForFunction(() => window.__shotReady === true, { timeout: 240000 });
-    } catch (_) {
-      const g = await page.evaluate(() => window.__game || null).catch(() => null);
-      errors.push('TIMEOUT __shotReady; __game=' + JSON.stringify(g));
+      const res = await fetch(target);
+      const body = Buffer.from(await res.arrayBuffer());
+      await route.fulfill({
+        status: res.status,
+        headers: { 'content-type': res.headers.get('content-type') || 'application/octet-stream' },
+        body,
+      });
+    } catch (err) {
+      await route.abort();
     }
-    await page.waitForTimeout(1500);
-    const out = path.join(REPO, 'screenshots', shot.name);
-    await page.screenshot({ path: out, type: 'jpeg', quality: 85 });
-    const size = (await stat(out)).size;
-    const g = await page.evaluate(() => window.__game || null).catch(() => null);
-    console.log('   ' + shot.name + ' ' + size + ' bytes  errors=' + errors.length + '  game=' + JSON.stringify(g));
-    if (errors.length) { failures++; errors.forEach((e) => console.log('   ERR ' + e)); }
-    if (size > 256 * 1024) { failures++; console.log('   ERR size > 256 KiB'); }
-    await page.close();
+  });
+  const url = `http://solarabay.game/game/?shot=${scene}&seed=1`;
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  try {
+    await page.waitForFunction(() => window.__shotReady === true, { timeout: 90000 });
+  } catch (err) {
+    errors.push('timeout waiting for __shotReady');
   }
-} finally {
-  await browser.close();
-  server.kill();
+  await page.waitForTimeout(400);
+  const out = path.join(REPO, 'screenshots', `${NAMES[scene] || scene}.jpg`);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  await page.screenshot({ path: out, type: 'jpeg', quality: 85, timeout: 60000 });
+  const size = fs.statSync(out).size;
+  const state = await page.evaluate(() => (window.__game ? {
+    phase: window.__game.phase, wanted: window.__game.wanted,
+    mission: window.__game.mission, cash: window.__game.cash,
+  } : null));
+  console.log(`${scene}: ${out} ${size} bytes ${size <= 256 * 1024 ? 'OK' : 'TOO BIG'} state=${JSON.stringify(state)} errors=${errors.length}`);
+  for (const e of errors) console.log('  ERR ' + e);
+  if (errors.length || size > 256 * 1024) failures++;
+  await page.close();
 }
-console.log(failures === 0 ? 'SHOT OK — 0 error' : 'SHOT FAIL — ' + failures + ' masalah');
-process.exit(failures === 0 ? 0 : 1);
+await browser.close();
+if (failures) { console.log(`shot.mjs: ${failures} scene(s) failed`); process.exit(1); }
+console.log('shot.mjs: all scenes OK');

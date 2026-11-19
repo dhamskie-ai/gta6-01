@@ -1,145 +1,162 @@
-// Scene deterministik ?shot= — staging + window.__shotReady.
-import { spawnCar } from './vehicles.js';
-import { stagePolice } from './police.js';
+import { CFG } from './config.js';
+import { makeCar } from './vehicles.js';
+import { placePlayer, syncPlayerToCar } from './player.js';
 import { startMission } from './missions.js';
 
-export function applyShot(G) {
-  const q = new URLSearchParams(location.search);
-  const shot = q.get('shot');
-  if (!shot) return false;
-  const seed = parseInt(q.get('seed') || '8', 10);
-  G.seed = seed;
-  G.shotMode = true;
-  G.phase = 'play';
-  G.hud.showGame();
-  const T = G.THREE, city = G.city;
-  const putPlayerInSport = (x, z, yaw, speed) => {
-    if (G.playerCar) { G.playerCar.mesh.visible = false; G.playerCar.dead = true; }
-    const car = spawnCar(G, T, city, 'sport', x, z, yaw, { isPlayer: true });
-    car.speed = speed || 0;
-    G._stagedSpeed = speed || 0;
-    G.playerCar = car;
-    G.player.inCar = true;
-    G.player.x = x; G.player.z = z;
-    return car;
-  };
-  const addTrafficNear = (x, z, n) => {
-    const spots = [[x + 6, z + 26], [x - 6, z + 40], [x + 5, z - 30], [x - 5, z + 55]];
-    for (let i = 0; i < Math.min(n, spots.length); i++) {
-      const [tx, tz] = spots[i];
-      const car = spawnCar(G, T, city, i % 2 ? 'sedan' : 'taxi', tx, tz, 0, { ai: { axis: 'z', road: -240, dir: 1, speed: 10, cruise: 10 } });
-      G.trafficCars.push(car);
-    }
-  };
-  if (shot === 'chase') {
-    // Meniru ref1: JOB 8/8 GOLDEN HOUR · Lupe, 1:47, STAGE 4/5, $86,250,
-    // 4 bintang, PCPD 9 UNITS · CODE 4, Malecón Celeste, SHOT CALLER 290/550.
-    G.cash = 86250;
-    G.wanted = 4; G.heat = 1;
-    G.timeOfDay = 18.8; G.day = 1;
-    G.missionsDone = 7; G.stats.missionsDone = 7;
-    G.respectPoints = 290;
-    startMission(G, 7);
-    G.mission.step = 3;
-    G.mission.timer = 107;
-    G.mission.progress = 0;
-    G.hud.showObjective('Lose the manhunt before Marco\u2019s boat sails');
-    const car = putPlayerInSport(-240, 60, 0, 31.1); // 112 km/h, G3
-    car.hp = car.maxHp;
-    // formasi kejar relatif terhadap mobil: belakang-kiri/kanan + samping
-    stagePolice(G, T, city, [[-5, -12], [5, -14], [-9, -2], [9, -4], [-6, 16], [7, 22]]);
-    // roadblock 2 unit di depan di boulevard
-    const rb1 = spawnCar(G, T, city, 'police', -243.4, 105, Math.PI / 2, { ai: { roadblock: true } });
-    rb1.callsign = 'TAC-45'; rb1.role = 'ROADBLOCK'; G.policeCars.push(rb1);
-    const rb2 = spawnCar(G, T, city, 'police', -236.6, 105, Math.PI / 2, { ai: { roadblock: true } });
-    rb2.callsign = 'BARRACUDA-18'; rb2.role = 'ROADBLOCK'; G.policeCars.push(rb2);
-    // callsign unit kejar sesuai ref1
-    const names = ['PELICAN-11', 'GECKO-25', 'IBIS-43', 'TARPON-19', 'HERON-17', 'MARLIN-26'];
-    G.policeCars.forEach((c, i) => { if (i < 6) c.callsign = names[i]; });
-    G.audio.trackIdx = 0; // Malecón Mirage · Vela Roja
-    G.hud.showDialog('Marco', 'The boat sails in two minutes, Nico! Shake that chopper and get to the pier!');
-    G.hud.ticker('They can see you — break line of sight');
-    addTrafficNear(-240, 60, 3);
-    G.beacon = { x: -297, z: 90, visible: true };
-  } else if (shot === 'drive') {
-    G.cash = 10350; G.wanted = 0; G.timeOfDay = 17.6; G.day = 1;
-    startMission(G, 1);
-    G.mission.step = 0; G.mission.timer = 0;
-    putPlayerInSport(-240, -40, Math.PI, 22);
-    G.player.camYaw = Math.PI;
-    addTrafficNear(-240, -40, 3);
-    G.hud.showDialog('Marco', 'Golden hour on the Malecón, Nico. This city is ours tonight.');
-    G.beacon.visible = false;
-  } else if (shot === 'street') {
-    G.cash = 10350; G.wanted = 0; G.timeOfDay = 12.0; G.day = 1;
-    startMission(G, 0);
-    G.mission.step = 0;
-    G.player.inCar = false; G.playerCar = null;
-    G.player.x = -240; G.player.z = 104; G.player.y = 0;
-    G.player.yaw = 0; G.player.camYaw = 2.84; G.player.camPitch = 0.12;
-    G.player.mesh.position.set(-240, 0, 104);
-    G.marco.mesh.visible = true;
-    G.marco.x = -240; G.marco.z = 87;
-    G.marco.mesh.position.set(-240, 0, 87);
-    G.shotPrompt = 'E — Bicara';
-    G.hud.showDialog('Marco', 'Nico! Over here — Marlin Ceviche. We need to talk.');
-    G.beacon = { x: -240, z: 90, visible: true };
-  } else if (shot === 'night') {
-    G.cash = 10350; G.wanted = 1; G.heat = 1; G.day = 1;
-    startMission(G, 3);
-    G.timeOfDay = 21.5; // sesudah startMission (misi 4 men-set 21.2)
-    G.mission.step = 0; G.mission.timer = 0;
-    putPlayerInSport(-240, 150, Math.PI, 14);
-    G.player.camYaw = Math.PI;
-    stagePolice(G, T, city, [[-5, -12]]);
-    G.policeCars[0].callsign = 'PELICAN-11';
-    G.hud.showDialog('Lupe', 'Neon nights, Nico. The courier moves at midnight — stay dark.');
-    G.beacon = { x: 60, z: 0, visible: true };
-  } else if (shot === 'harbor') {
-    G.cash = 10350; G.wanted = 0; G.timeOfDay = 18.2; G.day = 1;
-    startMission(G, 5);
-    G.mission.step = 2;
-    G.player.inCar = false; G.playerCar = null;
-    G.player.x = -297; G.player.z = 90; G.player.y = 0;
-    G.player.camYaw = 2.2;
-    G.player.mesh.position.set(-297, 0, 90);
-    G.shotPrompt = 'E — Fish (6s)';
-    G.hud.showDialog('Lupe', 'Walk it to the end of the pier, Nico. The boat is waiting.');
-    G.beacon = { x: -297, z: 90, visible: true };
-  }
-  G.shotPending = true;
-  G.shotFrames = 0;
-  window.__game = snapshot(G);
-  return true;
+function setCar(G, type, x, z, heading, speed) {
+  if (G.car) { G.W.scene.remove(G.car.group); }
+  const car = makeCar(type, x, z, heading, undefined, true);
+  car.speed = speed || 0;
+  car.isPlayer = true;
+  G.W.scene.add(car.group);
+  G.car = car;
+  G.inCar = true;
+  G.player.mesh.visible = false;
+  syncPlayerToCar(G);
+  return car;
 }
 
-export function shotTick(G) {
-  if (!G.shotPending) return;
-  // tahan kecepatan staging (HUD speedometer) + prompt staging tiap frame
-  if (G.shotMode && G.playerCar && G._stagedSpeed) G.playerCar.speed = G._stagedSpeed;
-  if (G.shotPrompt) G.prompt = G.shotPrompt;
-  G.shotFrames++;
-  window.__game = snapshot(G);
-  if (G.shotFrames >= 3 && !window.__shotReady) {
+function setOnFoot(G, x, z, heading) {
+  if (G.car) { G.W.scene.remove(G.car.group); G.car = null; }
+  G.inCar = false;
+  G.player.mesh.visible = true;
+  placePlayer(G, x, z, heading || 0);
+}
+
+export function applyShot(G, name) {
+  G.shotMode = true;
+  G.shotName = name;
+  G.phase = 'play';
+  G._shotWantedLock = true;
+  G._shotPlaced = false;
+  G._shotFrames = 0;
+  if (G.hud) G.hud.setPhase('play');
+  G.enemies = [];
+  if (name === 'chase') {
+    G.timeOfDay = 18.4;
+    G.day = 1;
+    setCar(G, 'veloce', 0, 30, 0, 26);
+    G.wanted = 3;
+    G.cash = 38420;
+    G.missionIndex = 2; G.missionStage = 1;
+    startMission(G, 2);
+    G.missionStage = 1;
+    G.missionTarget = { x: 0, z: 120, r: 7, label: 'Antar paket 2/3 — Old Solara' };
+    if (G.hud) G.hud.showObjective('Antar paket 2/3 — Old Solara');
+  } else if (name === 'drive') {
+    G.timeOfDay = 17.6;
+    G.day = 1;
+    setCar(G, 'veloce', -240, -40, 0, 22);
+    G.wanted = 0;
+    G.cash = 10350;
+    G.missionIndex = 2; G.missionStage = 0;
+    startMission(G, 2);
+    G.missionStage = 0;
+    G.missionTarget = { x: 120, z: 120, r: 7, label: 'Antar paket 1/3 — The Spires' };
+  } else if (name === 'street') {
+    G.timeOfDay = 12.0;
+    G.day = 1;
+    setOnFoot(G, -60, 120, Math.PI);
+    G.wanted = 0;
+    G.cash = 10350;
+    G.weapon = 2;
+    G.missionIndex = 0; G.missionStage = 0;
+    startMission(G, 0);
+    G.missionStage = 0;
+    G.missionTarget = { x: -232, z: 70, r: 6, label: 'Curi VELOZ COMET RS di Malecón' };
+    G._promptText = 'E — Bicara';
+  } else if (name === 'night') {
+    G.timeOfDay = 21.5;
+    G.day = 1;
+    setCar(G, 'veloce', -230, 60, 0, 14);
+    G.wanted = 1;
+    G.cash = 24800;
+    G.missionIndex = 4; G.missionStage = 0;
+    startMission(G, 4);
+    G.missionStage = 0;
+    G.timeOfDay = 21.5; // startMission(3) does not force night; keep staged night
+    G.missionTarget = { x: 0, z: 0, r: 45, label: 'Buntuti kurir Dario (jaga jarak 12–45 m)' };
+  } else if (name === 'harbor') {
+    G.timeOfDay = 19.0;
+    G.day = 1;
+    setOnFoot(G, -250, 84, -Math.PI / 2);
+    G.wanted = 0;
+    G.cash = 15200;
+    G.missionIndex = 6; G.missionStage = 0;
+    startMission(G, 6);
+    G.missionStage = 0;
+    G.missionTarget = { x: CFG.lighthouse.x, z: CFG.lighthouse.z, r: 9, label: 'Ke mercusuar' };
+  } else {
+    G.timeOfDay = 17.0;
+    setOnFoot(G, CFG.playerStart.x, CFG.playerStart.z, 0);
+    startMission(G, 0);
+  }
+  if (name === 'chase') G.wanted = 3;
+  if (name === 'night') G.wanted = 1;
+  if (name === 'drive' || name === 'street' || name === 'harbor') G.wanted = 0;
+}
+
+export function tickShot(G) {
+  if (!G.shotMode) return;
+  G._shotFrames++;
+  const px = G.player.x, pz = G.player.z;
+  const fx = Math.sin(G.player.heading), fz = Math.cos(G.player.heading);
+  if (!G._shotPlaced) {
+    if (G.shotName === 'chase') {
+      if (G.policeCars.length >= 2) {
+        G.policeCars.slice(0, 2).forEach((pc, i) => {
+          if (i === 0) {
+            pc.car.x = px + fx * 18 + 3.2 * fz;
+            pc.car.z = pz + fz * 18 - 3.2 * fx;
+          } else {
+            pc.car.x = px - fx * 20 + 3.5 * fz;
+            pc.car.z = pz - fz * 20 - 3.5 * fx;
+          }
+          pc.car.heading = G.player.heading;
+          pc.car.speed = 24;
+        });
+        G._shotPlaced = true;
+      }
+      G.traffic.slice(0, 3).forEach((t, i) => {
+        t.car.x = px + fx * (26 + i * 16) + (i % 2 ? 2.2 : -2.2) * fz;
+        t.car.z = pz + fz * (26 + i * 16) - (i % 2 ? 2.2 : -2.2) * fx;
+        t.car.heading = G.player.heading;
+        t.car.speed = 10;
+        t.axis = 'z'; t.line = 0; t.dir = 1;
+      });
+    } else if (G.shotName === 'drive') {
+      G.traffic.slice(0, 3).forEach((t, i) => {
+        t.car.x = -240 + (i % 2 ? 2.2 : -2.2);
+        t.car.z = -40 + 30 + i * 18;
+        t.car.heading = 0;
+        t.car.speed = 10;
+        t.axis = 'z'; t.line = -240; t.dir = 1;
+      });
+      G.peds.slice(0, 4).forEach((p, i) => {
+        p.x = -249; p.z = -30 + i * 9; p.axis = 'z'; p.dir = 1;
+      });
+      G._shotPlaced = true;
+    } else if (G.shotName === 'street') {
+      G.peds.slice(0, 6).forEach((p, i) => {
+        p.x = -60 + (i % 3 - 1) * 5;
+        p.z = 120 + (Math.floor(i / 3) - 0.5) * 12 + i * 2;
+        p.axis = 'x'; p.dir = i % 2 ? 1 : -1;
+      });
+      G._shotPlaced = true;
+    } else if (G.shotName === 'night') {
+      G.traffic.slice(0, 2).forEach((t, i) => {
+        t.car.x = -240 + (i % 2 ? 2.2 : -2.2);
+        t.car.z = 60 + 24 + i * 16;
+        t.car.heading = 0;
+        t.car.speed = 9;
+        t.axis = 'z'; t.line = -240; t.dir = 1;
+      });
+      G._shotPlaced = true;
+    } else {
+      G._shotPlaced = true;
+    }
+  }
+  if (G._shotFrames > 4 && !window.__shotReady) {
     window.__shotReady = true;
   }
-}
-
-export function snapshot(G) {
-  return {
-    phase: G.phase,
-    wanted: G.wanted,
-    cash: Math.round(G.cash),
-    mission: G.mission ? G.mission.index : -1,
-    step: G.mission ? G.mission.step : -1,
-    timer: G.mission ? Math.round(G.mission.timer) : 0,
-    inCar: !!G.player.inCar,
-    x: Math.round(G.player.x * 10) / 10,
-    z: Math.round(G.player.z * 10) / 10,
-    speed: G.playerCar ? Math.round(Math.abs(G.playerCar.speed) * 3.6) : 0,
-    health: Math.round(G.health),
-    timeOfDay: Math.round(G.timeOfDay * 100) / 100,
-    policeUnits: (G.policeUnits || []).length,
-    shotMode: !!G.shotMode,
-  };
 }
