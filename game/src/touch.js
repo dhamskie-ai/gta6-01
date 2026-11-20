@@ -1,92 +1,64 @@
-// Touch controls for phones: virtual joystick (bottom-left), MASUK/KELUAR,
-// REM, KAM buttons (bottom-right), finger drag rotates the camera.
-// Only shown on touch devices (or ?touch=1 for testing). Desktop keyboard
-// + pointer lock are untouched by this file.
-import { G } from './config.js';
-import { touch } from './input.js';
+// Touch controls: joystick, ENTER/REM/KAM/TEMBAK buttons, drag-to-look.
+import { driveCarRef, exitCar } from './player.js';
+import { shoot } from './combat.js';
+import { toggleMute } from './audio.js';
 
-let joyBase = null, joyKnob = null, joyId = null, joyC = null;
-let camId = null, camLX = 0, camLY = 0;
-
-export function touchActive() {
-  return G.touchMode;
-}
-
-export function initTouch() {
-  const params = new URLSearchParams(location.search);
-  const coarse = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-  if (!coarse && params.get('touch') !== '1') return;
-  G.touchMode = true;
-  touch.active = true;
+export function initTouch(G) {
+  G.touchMode = 'ontouchstart' in window || matchMedia('(pointer: coarse)').matches
+    || new URLSearchParams(location.search).has('touch');
+  G.joy = { x: 0, y: 0 };
+  G.touchShoot = false;
+  if (!G.touchMode) return;
   document.body.classList.add('touch');
-  const ui = document.getElementById('touch-ui');
-  ui.style.display = 'block';
-  joyBase = document.getElementById('joy-base');
-  joyKnob = document.getElementById('joy-knob');
-  const rect = () => joyBase.getBoundingClientRect();
+  const el = G.el;
+  const joyBase = el.joyBase, knob = el.joyKnob;
+  let joyId = null;
   const setKnob = (dx, dy) => {
-    joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-    touch.moveX = dx / 44; touch.moveY = dy / 44;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
   };
   joyBase.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    const t = e.changedTouches[0];
-    joyId = t.identifier; joyC = rect();
-    moveJoy(t);
+    joyId = e.changedTouches[0].identifier;
   }, { passive: false });
-  const moveJoy = (t) => {
-    const cx = joyC.left + joyC.width / 2, cy = joyC.top + joyC.height / 2;
-    let dx = t.clientX - cx, dy = t.clientY - cy;
-    const len = Math.hypot(dx, dy), max = 44;
-    if (len > max) { dx = (dx / len) * max; dy = (dy / len) * max; }
-    setKnob(dx, dy);
-  };
-  joyBase.addEventListener('touchmove', (e) => {
-    e.preventDefault();
-    for (const t of e.changedTouches) if (t.identifier === joyId) moveJoy(t);
+  addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) {
+        const r = joyBase.getBoundingClientRect();
+        let dx = t.clientX - (r.left + r.width / 2);
+        let dy = t.clientY - (r.top + r.height / 2);
+        const d = Math.hypot(dx, dy), max = 44;
+        if (d > max) { dx *= max / d; dy *= max / d; }
+        setKnob(dx, dy);
+        G.joy.x = dx / max; G.joy.y = dy / max;
+      } else if (G.dragId === t.identifier) {
+        G.camYaw -= (t.clientX - G.dragX) * 0.005;
+        G.camPitch = Math.max(-0.9, Math.min(0.25, G.camPitch + (t.clientY - G.dragY) * 0.004));
+        G.dragX = t.clientX; G.dragY = t.clientY;
+      }
+    }
   }, { passive: false });
-  const endJoy = (e) => {
+  addEventListener('touchend', (e) => {
     for (const t of e.changedTouches) {
-      if (t.identifier === joyId) { joyId = null; setKnob(0, 0); }
+      if (t.identifier === joyId) { joyId = null; G.joy.x = 0; G.joy.y = 0; setKnob(0, 0); }
+      if (t.identifier === G.dragId) G.dragId = null;
     }
-  };
-  joyBase.addEventListener('touchend', endJoy);
-  joyBase.addEventListener('touchcancel', endJoy);
-  // camera drag anywhere on the canvas that is not a control
-  const canvas = document.getElementById('game');
-  canvas.addEventListener('touchstart', (e) => {
-    for (const t of e.changedTouches) {
-      if (t.target.closest('#touch-ui')) continue;
-      camId = t.identifier; camLX = t.clientX; camLY = t.clientY;
-    }
-  }, { passive: true });
-  canvas.addEventListener('touchmove', (e) => {
-    for (const t of e.changedTouches) {
-      if (t.identifier !== camId) continue;
-      touch.camDX += t.clientX - camLX; touch.camDY += t.clientY - camLY;
-      camLX = t.clientX; camLY = t.clientY;
-    }
-  }, { passive: true });
-  canvas.addEventListener('touchend', (e) => {
-    for (const t of e.changedTouches) if (t.identifier === camId) camId = null;
   });
-  const bindHold = (id, on, off) => {
-    const el = document.getElementById(id);
-    el.addEventListener('touchstart', (e) => { e.preventDefault(); on(); }, { passive: false });
-    if (off) {
-      el.addEventListener('touchend', off);
-      el.addEventListener('touchcancel', off);
-    }
-  };
-  bindHold('btn-enter', () => { touch.enter = true; });
-  bindHold('btn-brake', () => { touch.brake = true; }, () => { touch.brake = false; });
-  bindHold('btn-cam', () => { touch.cam = true; G.camDist = G.camDist > 10 ? 7 : 13; });
-  bindHold('btn-shoot', () => { touch.shoot = true; }, () => { touch.shoot = false; });
+  G.canvas.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    G.dragId = t.identifier; G.dragX = t.clientX; G.dragY = t.clientY;
+  }, { passive: true });
+  const bindBtn = (elm, fn) => { if (elm) elm.addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false }); };
+  bindBtn(el.btnEnter, () => {
+    if (driveCarRef(G)) exitCar(G);
+    else G.pressed.KeyE = true;
+  });
+  bindBtn(el.btnBrake, () => { G.touchBrake = true; setTimeout(() => { G.touchBrake = false; }, 300); });
+  bindBtn(el.btnCam, () => { G.camDist = G.camDist === 9 ? 7 : G.camDist === 7 ? 13 : 9; });
+  bindBtn(el.btnShoot, () => { G.touchShoot = true; });
 }
-
-// Called every frame: keep the MASUK/KELUAR label truthful.
-export function updateTouchUI() {
+export function updateTouchUI(G) {
   if (!G.touchMode) return;
-  const b = document.getElementById('btn-enter');
-  if (b) b.textContent = G.player.car ? 'KELUAR' : 'MASUK';
+  const car = driveCarRef(G);
+  if (G.el.btnEnter) G.el.btnEnter.textContent = car ? 'KELUAR' : 'MASUK';
+  if (G.el.touchUi) G.el.touchUi.style.display = G.phase === 'play' ? 'block' : 'none';
 }

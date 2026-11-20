@@ -1,51 +1,53 @@
-# SOLARA BAY — Make GTA 6 (make.fun gta6-01)
+# SOLARA BAY
 
-Open-world crime game 3D (three.js) di kota pantai fiktif Solara Bay.
-Nico pulang ke kotanya: curi mobil, kabur dari PCPD, kerjakan 8 job untuk
-Marco dan Lupe di sepanjang Malecón Celeste — dengan radio CELESTE 98.1
-mengiringi dari VELOZ COMET RS.
+Open-world crime game 3D (three.js, offline, static files) — make.fun
+competition `gta6-01`. Play as Nico, back in Solara Bay: steal cars, outrun
+the PCPD, run 8 jobs for Marco and Lupe — taxi fares, street races, fishing
+off the pier, and photos of 6 hidden spots. Radio: CELESTE 98.1.
 
-## Main
+## Play
 
-```sh
+```
 node serve.ts
-# buka http://localhost:8080
 ```
 
-Tidak ada build step, tidak ada network request: semua art prosedural
-(geometri three.js + canvas texture) dan semua suara WebAudio sintetis.
+Open http://localhost:8080 — desktop Chrome, keyboard + mouse. Touch
+controls appear on touch devices (or `?touch=1`).
 
-## Kontrol
+## Controls
 
-- WASD jalan / nyetir, Shift lari / handbrake, Space lompat / rem
-- Mouse: putar kamera (klik untuk pointer lock), scroll/C: jarak kamera
-- E: masuk / keluar mobil, bicara dengan NPC
-- H: klakson · M: mute · 1/2/3: senjata · R: reload
-- T: taksi · R: balapan (di mobil) · F: mancing · P: foto · K: paket kilat
-- HP (layar sentuh): joystick kiri, tombol MASUK/KELUAR, REM, KAM, TEMBAK
+WASD walk · Shift run · Space jump · E enter/exit car / talk · H horn ·
+M mute · 1/2/3 weapons · R reload (on foot) / race (in car) · T taxi ·
+F fish · P photo · K courier · C camera · Esc pause.
 
-## Sistem
+## World (round 6j)
 
-- Kota 640×640 m: Malecón Celeste, Old Solara, Plaza Spires, The Docks,
-  mercusuar, dermaga, kincir ria, pantai + jetski, bus & taco truck
-- 8 misi cerita (First Gear, Meet Marco, Courier Run, Docks Job, Neon
-  Nights, Street Race, Beach Party, Golden Hour) + 5 aktivitas sampingan:
-  taksi $40, balapan $120, mancing $15/ikan, 6 spot foto (+$60), paket $60
-- Wanted 0–5 bintang, patroli PCPD + polisi jalan kaki + helikopter di 3+
-- 7 model mobil drivable (sport, taksi, sedan, van, truk, bus, polisi)
-- Siklus siang–malam, sunset oranye-ungu, neon, jendela menyala malam
-- Save otomatis di localStorage setelah tiap misi selesai
+- City 640×640 m, 5×5 road grid + east ring road (x=312) + south ring road
+  (z=312) + beach promenade (x=-258, pedestrians only).
+- 36 traffic cars, ~150 pedestrians, 24 parked cars, 22 birds, denser
+  skyline (3–4 buildings per block, 2 Spires towers, 4 Plaza landmark
+  towers 60–90 m), second palm row on the Malecón, 24 shade trees.
+- HD kept from 6g/6i: 4096² ground texture, geometry road markings
+  (InstancedMesh dashes/edges/zebras), 1024² facades with per-building UV
+  repeat, fog 220–1100, pixelRatio cap 2.
+- 8 missions, wanted 0–5 with PCPD cars, foot cops and heli, Spray &
+  Shine respray, combat (fists / VESPER 72 / MAKO SMG), guards, save in
+  localStorage (`solarabay-save-v1`).
 
-## Screenshot
+## Shots
 
-```sh
-node tools/shot.mjs chase    # dst: screenshots/1-chase.jpg
 ```
+node tools/shot.mjs all
+```
+
+7 scenes: chase, drive, street, night, touch, road-zoom, phone
+(390×844). See `shots.json`.
 
 ## Dossier
 
-```sh
+```
 MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-Lisensi: MIT — lihat LICENSE.
+MIT licensed. All names, characters, vehicles, story, art, sound and
+music are original — no Rockstar content.

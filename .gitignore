@@ -1,5 +1,4 @@
-node_modules/
 out/
-screenshots/*.tmp
-*.tmp
+node_modules/
 .DS_Store
+*.log

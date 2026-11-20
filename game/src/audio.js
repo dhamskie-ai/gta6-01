@@ -1,119 +1,88 @@
-// Procedural WebAudio only — zero audio files. Engine pitch follows speed,
-// horn (H), skid, siren, gunshots, jingles, city ambience, radio pad.
-import { G, CFG } from './config.js';
-
-let ctx = null, master = null, engOsc = null, engOsc2 = null, engGain = null;
-let engFilter = null, ambGain = null, sirenOsc = null, sirenGain = null;
-let radioT = 0, radioStep = 0, muted = false;
-
-function ac() {
-  if (ctx) return ctx;
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return null;
-  ctx = new AC();
-  master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination);
-  return ctx;
+// WebAudio synth: engine, ambience, siren, radio pad, sfx. No audio files.
+import * as THREE from 'three';
+export function initAudio(G) {
+  G.muted = false;
+  G.audio = { ctx: null, eng: null, engGain: null, siren: null, sirenGain: null, pad: null, track: 0, trackT: 0 };
+  const start = () => {
+    if (G.audio.ctx) { if (G.audio.ctx.state === 'suspended') G.audio.ctx.resume(); return; }
+    try {
+      const C = new (window.AudioContext || window.webkitAudioContext)();
+      const A = G.audio; A.ctx = C;
+      A.eng = C.createOscillator(); A.eng.type = 'sawtooth'; A.eng.frequency.value = 55;
+      const sq = C.createOscillator(); sq.type = 'square'; sq.frequency.value = 28;
+      const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+      A.engGain = C.createGain(); A.engGain.gain.value = 0;
+      A.eng.connect(lp); sq.connect(lp); lp.connect(A.engGain); A.engGain.connect(C.destination);
+      A.eng.start(); sq.start();
+      const nb = C.createBuffer(1, C.sampleRate * 2, C.sampleRate);
+      const d = nb.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const ns = C.createBufferSource(); ns.buffer = nb; ns.loop = true;
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 320;
+      const ng = C.createGain(); ng.gain.value = 0.05;
+      ns.connect(bp); bp.connect(ng); ng.connect(C.destination); ns.start();
+      A.siren = C.createOscillator(); A.siren.type = 'triangle'; A.siren.frequency.value = 720;
+      A.sirenGain = C.createGain(); A.sirenGain.gain.value = 0;
+      A.siren.connect(A.sirenGain); A.sirenGain.connect(C.destination); A.siren.start();
+      A.pad = C.createGain(); A.pad.gain.value = 0.05; A.pad.connect(C.destination);
+    } catch { /* audio unavailable */ }
+  };
+  G.startAudio = start;
+  addEventListener('pointerdown', start, { once: true });
+  addEventListener('keydown', start, { once: true });
 }
-
-export function initAudio() {
-  const c = ac(); if (!c) return;
-  if (c.state === 'suspended') c.resume();
-  if (engOsc) return;
-  engOsc = c.createOscillator(); engOsc.type = 'sawtooth'; engOsc.frequency.value = 55;
-  engOsc2 = c.createOscillator(); engOsc2.type = 'square'; engOsc2.frequency.value = 28;
-  engFilter = c.createBiquadFilter(); engFilter.type = 'lowpass'; engFilter.frequency.value = 700;
-  engGain = c.createGain(); engGain.gain.value = 0;
-  const g2 = c.createGain(); g2.gain.value = 0.4;
-  engOsc.connect(engFilter); engOsc2.connect(g2); g2.connect(engFilter);
-  engFilter.connect(engGain); engGain.connect(master);
-  engOsc.start(); engOsc2.start();
-  // City ambience: looped filtered noise, quiet.
-  const len = c.sampleRate * 2, buf = c.createBuffer(1, len, c.sampleRate);
-  const d = buf.getChannelData(0);
-  let last = 0;
-  for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3; }
-  const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
-  const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 320; bp.Q.value = 0.4;
-  ambGain = c.createGain(); ambGain.gain.value = 0.05;
-  src.connect(bp); bp.connect(ambGain); ambGain.connect(master); src.start();
-  // Police siren, silent until wanted >= 2.
-  sirenOsc = c.createOscillator(); sirenOsc.type = 'triangle'; sirenOsc.frequency.value = 720;
-  sirenGain = c.createGain(); sirenGain.gain.value = 0;
-  sirenOsc.connect(sirenGain); sirenGain.connect(master); sirenOsc.start();
+function tone(G, freq, dur, type, vol, slideTo) {
+  const A = G.audio; if (!A || !A.ctx || G.muted) return;
+  const C = A.ctx, o = C.createOscillator(), g = C.createGain();
+  o.type = type || 'square'; o.frequency.value = freq;
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, C.currentTime + dur);
+  g.gain.setValueAtTime(vol || 0.15, C.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, C.currentTime + dur);
+  o.connect(g); g.connect(C.destination); o.start(); o.stop(C.currentTime + dur);
 }
-
-export function setMuted(m) {
-  muted = m; G.muted = m;
-  if (master) master.gain.value = m ? 0 : 0.5;
+export function sfx(G, name) {
+  if (!G.audio || !G.audio.ctx || G.muted) return;
+  const seq = (notes, step, type, vol) => notes.forEach((n, i) =>
+    setTimeout(() => tone(G, n, 0.16, type, vol), i * step));
+  if (name === 'horn') { tone(G, 370, 0.25, 'square', 0.2); tone(G, 466, 0.25, 'square', 0.2); }
+  else if (name === 'shot') tone(G, 900, 0.08, 'square', 0.25, 120);
+  else if (name === 'punch') tone(G, 160, 0.08, 'square', 0.25, 60);
+  else if (name === 'click') tone(G, 1200, 0.04, 'square', 0.1);
+  else if (name === 'splash') tone(G, 500, 0.3, 'sine', 0.15, 150);
+  else if (name === 'camera') { tone(G, 2000, 0.05, 'square', 0.12); setTimeout(() => tone(G, 1500, 0.06, 'square', 0.12), 60); }
+  else if (name === 'coin') { tone(G, 988, 0.09, 'sine', 0.2); setTimeout(() => tone(G, 1319, 0.18, 'sine', 0.2), 90); }
+  else if (name === 'jingle') seq([523, 659, 784, 1047], 110, 'sine', 0.2);
+  else if (name === 'fail') seq([392, 330, 262], 160, 'sine', 0.2);
+  else if (name === 'gull') tone(G, 1400, 0.25, 'sine', 0.06, 900);
+  else if (name === 'skid') tone(G, 300, 0.2, 'sawtooth', 0.08, 180);
 }
-export function toggleMute() { setMuted(!muted); return muted; }
-export function isMuted() { return muted; }
-
-function blip(freq, dur, type, vol, slideTo) {
-  const c = ac(); if (!c || muted) return;
-  const o = c.createOscillator(), g = c.createGain();
-  o.type = type || 'sine'; o.frequency.setValueAtTime(freq, c.currentTime);
-  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, c.currentTime + dur);
-  g.gain.setValueAtTime(vol || 0.2, c.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
-  o.connect(g); g.connect(master); o.start(); o.stop(c.currentTime + dur);
-}
-
-function noiseBurst(dur, freq, vol) {
-  const c = ac(); if (!c || muted) return;
-  const len = Math.floor(c.sampleRate * dur), buf = c.createBuffer(1, len, c.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-  const s = c.createBufferSource(); s.buffer = buf;
-  const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 0.8;
-  const g = c.createGain(); g.gain.value = vol;
-  s.connect(f); f.connect(g); g.connect(master); s.start();
-}
-
-export const sfx = {
-  horn() { blip(370, 0.35, 'square', 0.16); blip(466, 0.35, 'square', 0.12); },
-  skid() { noiseBurst(0.4, 900, 0.25); },
-  shot() { noiseBurst(0.12, 1800, 0.4); blip(160, 0.08, 'square', 0.25, 60); },
-  punch() { noiseBurst(0.08, 300, 0.3); },
-  click() { blip(880, 0.05, 'sine', 0.12); },
-  splash() { noiseBurst(0.5, 500, 0.2); },
-  camera() { blip(1200, 0.06, 'sine', 0.15); blip(900, 0.08, 'sine', 0.12); },
-  coin() { blip(988, 0.1, 'sine', 0.18); setTimeout(() => blip(1319, 0.18, 'sine', 0.18), 90); },
-  jingle() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.2), i * 110)); },
-  fail() { [392, 330, 262].forEach((f, i) => setTimeout(() => blip(f, 0.25, 'triangle', 0.18), i * 130)); },
-  gull() { blip(1400, 0.18, 'sine', 0.05, 1900); },
-};
-
-// Called every frame: engine follows speed, siren wails with wanted,
-// radio pad cycles a soft A-minor progression (CELESTE 98.1).
-export function updateAudio(dt, speed01, driving) {
-  if (!ctx || muted) { if (engGain) engGain.gain.value = 0; return; }
-  const t = ctx.currentTime;
-  if (engOsc && engGain) {
-    const rpm = 55 + speed01 * 240 + (driving ? 18 : 0);
-    engOsc.frequency.setTargetAtTime(rpm, t, 0.06);
-    engOsc2.frequency.setTargetAtTime(rpm * 0.5, t, 0.06);
-    engFilter.frequency.setTargetAtTime(500 + speed01 * 1800, t, 0.1);
-    engGain.gain.setTargetAtTime(driving ? 0.06 + speed01 * 0.09 : 0.0, t, 0.1);
+export function updateAudio(G, dt) {
+  const A = G.audio; if (!A || !A.ctx || G.muted) return;
+  const car = G.player.car;
+  const speed = car && typeof car.speed === 'number' ? Math.abs(car.speed) : 0;
+  if (A.engGain) A.engGain.gain.value = car ? 0.03 + Math.min(0.09, speed * 0.002) : 0;
+  if (A.eng) A.eng.frequency.value = 55 + speed * 2.2;
+  if (A.sirenGain) A.sirenGain.gain.value = G.wanted >= 2 ? 0.05 : 0;
+  if (A.siren && G.wanted >= 2) A.siren.frequency.value = 680 + 160 * Math.sin(G.elapsed * 2.2);
+  // Radio pad: A-minor roots cycle every 2.2 s.
+  A.trackT += dt;
+  if (A.trackT > 2.2) {
+    A.trackT = 0; A.track = (A.track + 1) % 4;
+    const roots = [110, 87.3, 98, 82.4];
+    const C = A.ctx;
+    [roots[A.track], roots[A.track] * 1.5, roots[A.track] * 2].forEach((f) => {
+      const o = C.createOscillator(), g = C.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.03, C.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, C.currentTime + 2.4);
+      o.connect(g); g.connect(A.pad); o.start(); o.stop(C.currentTime + 2.4);
+    });
   }
-  if (sirenOsc && sirenGain) {
-    const on = G.wanted >= 2 && G.phase === 'play';
-    sirenGain.gain.setTargetAtTime(on ? 0.045 : 0, t, 0.2);
-    if (on) sirenOsc.frequency.setTargetAtTime(680 + 160 * Math.sin(G.elapsed * 2.4), t, 0.05);
-  }
-  if (ambGain) ambGain.gain.setTargetAtTime(G.phase === 'play' ? 0.05 : 0.02, t, 0.5);
-  radioT += dt;
-  if (radioT > 2.2) {
-    radioT = 0;
-    const roots = [110, 87.3, 98, 82.4]; // A2 F2 G2 E2
-    const root = roots[radioStep % 4]; radioStep++;
-    blip(root, 2.0, 'triangle', 0.035);
-    blip(root * 1.5, 2.0, 'triangle', 0.022);
-    blip(root * 2, 1.6, 'sine', 0.015);
-  }
-  if (G.player.pos.x < -240 && Math.random() < dt * 0.06) sfx.gull();
 }
-
-export function radioTrack() {
-  return CFG.tracks[Math.floor(G.elapsed / 25) % CFG.tracks.length];
+export function toggleMute(G) {
+  G.muted = !G.muted;
+  if (G.audio && G.audio.ctx) {
+    if (G.audio.engGain) G.audio.engGain.gain.value = 0;
+    if (G.audio.sirenGain) G.audio.sirenGain.gain.value = 0;
+  }
 }

@@ -1,193 +1,201 @@
-// HUD: mission panel, vitals, cash/stars/clock, PCPD response list,
-// circular minimap, district + respect, dialog with portrait, radio
-// CELESTE 98.1, speedometer, job counter, prompts, menus, save/load.
-// Layout fix (6i): the job counter lives under the mission panel, the
-// dialog sits bottom-centre — they can no longer overlap.
-import { G, CFG } from './config.js';
-import { districtAt } from './city.js';
-import { policeUnits } from './police.js';
-import { radioTrack, toggleMute, isMuted } from './audio.js';
+// HUD DOM, minimap, dialogs, menus, save/load.
+import { CFG, MISSIONS, PHOTO_SPOTS } from './config.js';
 import { driveCarRef } from './player.js';
+import { startMission } from './missions.js';
+import { setWanted } from './police.js';
 
-const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'solarabay-save-v1';
-let dlgTimer = null, policeT = 0, mmCtx = null;
-
-export function initHud() {
-  mmCtx = $('minimap').getContext('2d');
-  $('mute-btn').addEventListener('click', () => toggleMuteBtn());
-  $('btn-new').addEventListener('click', () => window.__startNew?.());
-  $('btn-continue').addEventListener('click', () => window.__startContinue?.());
-  $('btn-resume').addEventListener('click', () => window.__resume?.());
-  $('btn-restart').addEventListener('click', () => window.__restartMission?.());
-  $('btn-save').addEventListener('click', () => { saveGame(); announce('GAME TERSIMPAN'); });
-  $('btn-quit').addEventListener('click', () => window.__quitToTitle?.());
-  $('btn-retry').addEventListener('click', () => window.__retry?.());
-  if (!hasSave()) $('btn-continue').style.opacity = '0.4';
+export function initHud(G) {
+  G.el = {};
+  document.querySelectorAll('[id]').forEach((el) => {
+    const key = el.id.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    G.el[key] = el;
+  });
+  G.centerMsg = (text, dur) => { G.centerMsgText = text; G.centerMsgT = dur || 2.5; };
+  G.showOver = (kind) => {
+    G.el.overTitle.textContent = kind === 'busted' ? 'DITANGKAP' : 'K.O.';
+    G.el.overScreen.style.display = 'flex';
+  };
+  const hideScreens = () => {
+    ['titleScreen', 'pauseScreen', 'overScreen'].forEach((k) => { if (G.el[k]) G.el[k].style.display = 'none'; });
+  };
+  G.startNew = () => {
+    G.cash = CFG.startCash; G.health = 100; G.armor = 0; G.day = 1;
+    G.timeOfDay = 12; G.stats = { stolen: 0, maxWanted: 0, kills: 0, photos: 0, fish: 0, deliveries: 0, races: 0 };
+    G.photosDone = [];
+    setWanted(G, 0);
+    G.player.car = null; G.player.mesh.visible = true;
+    G.player.x = CFG.startPos[0]; G.player.z = CFG.startPos[1];
+    G.player.mesh.position.set(G.player.x, 0, G.player.z);
+    G.phase = 'play'; hideScreens();
+    startMission(G, 0);
+    G.saveGame();
+  };
+  G.startContinue = () => {
+    const s = loadSave();
+    if (s) {
+      G.cash = s.cash; G.health = s.health; G.day = s.day || 1;
+      G.stats = { ...G.stats, ...s.stats };
+      G.player.x = s.x; G.player.z = s.z;
+      G.player.mesh.position.set(s.x, 0, s.z);
+      G.phase = 'play'; hideScreens();
+      startMission(G, s.missionIdx || 0);
+    } else G.startNew();
+  };
+  G.pauseGame = () => { if (G.phase === 'play') { G.phase = 'pause'; G.el.pauseScreen.style.display = 'flex'; } };
+  G.resumeGame = () => { G.phase = 'play'; G.el.pauseScreen.style.display = 'none'; };
+  G.restartMission = () => { G.health = 100; setWanted(G, 0); G.phase = 'play'; hideScreens(); startMission(G, G.missionIdx); };
+  G.retry = () => {
+    G.health = 100; G.armor = 0; setWanted(G, 0);
+    G.player.car = null; G.player.mesh.visible = true;
+    G.player.x = CFG.startPos[0]; G.player.z = CFG.startPos[1];
+    G.player.mesh.position.set(G.player.x, 0, G.player.z);
+    G.phase = 'play'; hideScreens();
+    startMission(G, G.missionIdx);
+  };
+  G.quitToTitle = () => { G.phase = 'title'; hideScreens(); G.el.titleScreen.style.display = 'flex'; };
+  G.saveGame = () => saveGame(G);
+  const bind = (id, fn) => { const el = G.el[id]; if (el) el.addEventListener('click', fn); };
+  bind('btnNew', () => G.startNew());
+  bind('btnContinue', () => G.startContinue());
+  bind('btnResume', () => G.resumeGame());
+  bind('btnRestart', () => G.restartMission());
+  bind('btnSave', () => { G.saveGame(); G.centerMsg('Game disimpan.', 2); });
+  bind('btnQuit', () => G.quitToTitle());
+  bind('btnRetry', () => G.retry());
+  bind('muteBtn', () => { if (G.toggleMute) G.toggleMute(); });
+  G.el.btnContinue.style.display = loadSave() ? 'block' : 'none';
 }
-
-export function toggleMuteBtn() {
-  const m = toggleMute();
-  $('mute-btn').textContent = m ? 'SUARA: MATI' : 'SUARA: HIDUP';
-}
-
-export function announce(t, dur = 2600) {
-  const el = $('center-msg');
-  el.textContent = t; el.style.opacity = '1';
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.opacity = '0'; }, dur);
-}
-
-export function showDialog(name, role, text, dur = 5200) {
-  $('dialog-box').style.display = 'flex';
-  $('dialog-portrait').textContent = name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-  $('dialog-name').textContent = `${name.toUpperCase()} · ${role}`;
-  $('dialog-text').textContent = text;
-  G.dialogUntil = G.elapsed + dur / 1000;
-  clearTimeout(dlgTimer);
-  dlgTimer = setTimeout(() => { $('dialog-box').style.display = 'none'; }, dur);
-}
-
-export function showObjective(t) { G.objective = t; $('mission-objective').textContent = t; }
-export function showPrompt(t) { G.prompt = t; $('prompt').textContent = t; $('prompt').style.display = t ? 'block' : 'none'; }
-
-function fmtCash(n) { return '$' + Math.floor(n).toLocaleString('en-US'); }
-function fmtClock() {
-  const h = Math.floor(G.timeOfDay), m = Math.floor((G.timeOfDay - h) * 60);
-  const label = G.timeOfDay < 12 ? 'PAGI' : G.timeOfDay < 17.5 ? 'SIANG' : G.timeOfDay < 19.5 ? 'SORE' : 'MALAM';
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} ${label}`;
-}
-
-export function setPhaseUI(phase) {
-  $('title-screen').style.display = phase === 'title' ? 'flex' : 'none';
-  $('pause-screen').style.display = phase === 'pause' ? 'flex' : 'none';
-  $('over-screen').style.display = phase === 'over' || phase === 'busted' ? 'flex' : 'none';
-  if (phase === 'over') $('over-title').textContent = 'K.O.';
-  if (phase === 'busted') $('over-title').textContent = 'DITANGKAP';
-  $('hud').style.display = phase === 'play' ? 'block' : 'none';
-}
-
-export function updateHud(dt) {
-  if (G.phase !== 'play') return;
-  // mission panel from live mission state (set by missions.js on G)
-  $('mission-chapter').textContent = G.missionTitle ? `JOB ${G.missionIdx + 1}/8 · ${G.missionTitle.toUpperCase()}` : 'FREE ROAM';
-  $('mission-timer').textContent = G.missionTimer > 0
-    ? `${Math.floor(G.missionTimer / 60)}:${String(Math.floor(G.missionTimer % 60)).padStart(2, '0')}` : '';
-  $('mission-stage').textContent = G.missionTitle ? `STAGE ${G.missionStage + 1}/${G.missionSteps || 1}` : '';
-  $('mission-next').textContent = G.missionNext ? `NEXT: ${G.missionNext}` : '';
-  $('mission-objective').textContent = G.objective;
-  // vitals
-  $('hp-bar').style.width = `${Math.max(0, G.health)}%`;
-  $('armor-bar').style.width = `${Math.max(0, G.armor)}%`;
-  $('weapon-name').textContent = G.weapons[G.weapon];
-  $('ammo-count').textContent = G.weapon === 0 ? '—' : `${G.ammo[G.weapon]} peluru`;
-  // jobs counter (top-left column, clear of the dialog)
-  $('jobs-row').textContent = `TAXI ${G.stats.taxi} · BALAP ${G.stats.races} · IKAN ${G.stats.fish} · FOTO ${G.stats.photos.length}/6 · PAKET ${G.stats.courier}`;
-  // top-right cluster
-  $('day-label').textContent = `DAY ${G.day}`;
-  $('stars').textContent = '★'.repeat(G.wanted) + '☆'.repeat(5 - G.wanted);
-  $('cash-label').textContent = fmtCash(G.cash);
-  $('clock-label').textContent = fmtClock();
-  // PCPD list, rebuilt at most twice a second
-  policeT -= dt;
-  if (policeT <= 0) {
-    policeT = 0.5;
-    const units = policeUnits();
-    const list = $('police-list');
-    list.style.display = G.wanted > 0 ? 'block' : 'none';
-    if (G.wanted > 0) {
-      $('police-head').textContent = `PCPD RESPONSE · ${units.length} UNITS`;
-      $('police-rows').innerHTML = units.slice(0, 6).map((u) =>
-        `<div class="prow"><span>${u.name}</span><span>${u.d}m</span><span class="${u.role === 'RAMMING' ? 'ram' : 'pur'}">${u.role}</span></div>`).join('')
-        + (units.length > 6 ? `<div class="prow">+${units.length - 6} more units in the search zone</div>` : '');
-    }
-  }
-  // radio + speed
-  $('radio-line').textContent = `♪ ${CFG.radio} · Neon Drive`;
-  $('track-line').textContent = radioTrack();
-  const car = driveCarRef();
-  if (car) {
-    const kmh = Math.round(Math.abs(car.speed) * 3.6);
-    $('speed-num').textContent = `${kmh}`;
-    $('speed-car').textContent = car.def.name;
-    $('speed-cond').style.width = `${Math.max(0, car.hp)}%`;
-    $('speed-gear').textContent = `G${1 + Math.min(5, Math.floor(Math.abs(car.speed) / 9))}`;
-    $('speed-box').style.display = 'block';
-  } else {
-    $('speed-box').style.display = 'none';
-  }
-  // fishing timing bar
-  const fb = $('fishing-bar');
-  if (G.fish.active) {
-    fb.style.display = 'block';
-    $('fish-needle').style.left = `${G.fish.needle * 100}%`;
-  } else fb.style.display = 'none';
-  if (G.dialogUntil && G.elapsed > G.dialogUntil) $('dialog-box').style.display = 'none';
-  drawMinimap();
-}
-
-export function drawMinimap() {
-  if (!mmCtx) return;
-  const S = 200, c = mmCtx, px = (m) => ((m + 320) / 640) * S;
-  c.clearRect(0, 0, S, S);
-  c.fillStyle = '#10151d'; c.fillRect(0, 0, S, S);
-  c.fillStyle = '#2f8fb0'; c.fillRect(0, 0, px(-298), S); // sea
-  c.fillStyle = '#d9c08a'; c.fillRect(px(-298), 0, px(-252) - px(-298), S); // sand
-  c.fillStyle = '#232a35';
-  for (let bx = -5; bx <= 5; bx++) for (let bz = -5; bz <= 5; bz++) c.fillRect(px(bx * 60 - 26), px(bz * 60 - 26), px(52) - px(0), px(52) - px(0));
-  // roads: light enough to read at a glance (was too dark)
-  c.strokeStyle = '#7d8590'; c.lineWidth = 5;
-  for (const r of CFG.roads) {
-    c.beginPath(); c.moveTo(0, px(r)); c.lineTo(S, px(r)); c.stroke();
-    c.beginPath(); c.moveTo(px(r), 0); c.lineTo(px(r), S); c.stroke();
-  }
-  c.strokeStyle = '#f7c948'; c.lineWidth = 1;
-  for (const r of CFG.roads) {
-    c.beginPath(); c.moveTo(0, px(r)); c.lineTo(S, px(r)); c.stroke();
-    c.beginPath(); c.moveTo(px(r), 0); c.lineTo(px(r), S); c.stroke();
-  }
-  const dot = (x, z, col, r) => { c.fillStyle = col; c.beginPath(); c.arc(px(x), px(z), r, 0, 7); c.fill(); };
-  dot(CFG.garage.x, CFG.garage.z, '#2aff5a', 4); // garage
-  dot(CFG.spray.x, CFG.spray.z, '#b48cff', 4); // spray shop
-  for (const s of CFG.photoSpots) if (!G.stats.photos.includes(s.id)) dot(s.x, s.z, '#7de3ff', 3);
-  // mission marker (pulsing yellow)
-  const mx = G.missionX ?? 0, mz = G.missionZ ?? 0;
-  if (G.missionIdx < 8) dot(mx, mz, '#ffd23d', 5 + Math.sin(G.elapsed * 5) * 1.5);
-  for (const u of G.police) if (u && typeof u.x === 'number') dot(u.x, u.z, '#ff2a2a', 3);
-  for (const t of G.traffic) if (t && typeof t.x === 'number') dot(t.x, t.z, '#c8ccd4', 2);
-  // player arrow
-  c.save();
-  c.translate(px(G.player.pos.x), px(G.player.pos.z));
-  c.rotate(Math.atan2(Math.sin(G.player.heading), Math.cos(G.player.heading)) + Math.PI);
-  c.fillStyle = '#ffffff';
-  c.beginPath(); c.moveTo(0, -7); c.lineTo(5, 6); c.lineTo(-5, 6); c.closePath(); c.fill();
-  c.restore();
-  $('district-label').textContent = districtAt(G.player.pos.x, G.player.pos.z).toUpperCase();
-  $('respect-label').textContent = `RESPECT ${G.respect} · SHOT CALLER`;
-  $('respect-bar').style.width = `${Math.min(100, G.respect * 20)}%`;
-}
-
-export function saveGame() {
+function saveGame(G) {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       cash: G.cash, missionIdx: G.missionIdx, health: G.health,
-      stats: G.stats, day: G.day, x: G.player.pos.x, z: G.player.pos.z,
+      stats: G.stats, day: G.day, x: G.player.x, z: G.player.z,
     }));
-  } catch { /* storage unavailable in some embeds */ }
+  } catch { /* storage unavailable */ }
 }
-
-export function loadGame() {
-  try {
-    const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-    if (!s) return null;
-    G.cash = s.cash; G.missionIdx = Math.min(7, s.missionIdx || 0);
-    G.health = s.health ?? 100; G.day = s.day || 1;
-    Object.assign(G.stats, s.stats || {});
-    G.player.pos.set(s.x ?? CFG.startPos.x, 0, s.z ?? CFG.startPos.z);
-    return s;
-  } catch { return null; }
+function loadSave() {
+  try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; }
 }
-
-export function hasSave() {
-  try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+function fmtTime(t) {
+  const h = Math.floor(t) % 24, m = Math.floor((t % 1) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+export function updateHud(G, dt) {
+  const el = G.el;
+  const m = MISSIONS[G.missionIdx];
+  el.missionChapter.textContent = m ? `JOB ${G.missionIdx + 1}/8 · ${m.title.toUpperCase()}` : 'SOLARA BAY';
+  el.missionTimer.textContent = m && m.timer ? `${Math.floor(G.missionTimer / 60)}:${String(Math.floor(G.missionTimer % 60)).padStart(2, '0')}` : '';
+  el.missionObjective.textContent = G.objective || '';
+  el.missionStage.textContent = m ? `STAGE ${G.missionStage + 1}/${m.steps.length}` : '';
+  el.missionNext.textContent = m ? `NEXT: ${m.next}` : 'Solara Bay is yours';
+  el.hpBar.style.width = `${Math.max(0, G.health)}%`;
+  el.armorBar.style.width = `${Math.max(0, G.armor)}%`;
+  const w = ['FISTS', 'VESPER 72', 'MAKO SMG'][G.player.weapon];
+  el.weaponName.textContent = w;
+  el.ammoCount.textContent = G.player.weapon === 0 ? '∞' : String(G.player.ammo[G.player.weapon]);
+  el.jobsRow.textContent = `TAKSI $40 · BALAP $120 · IKAN $15 · FOTO ${G.photosDone.length}/6 · PAKET $60`;
+  el.dayLabel.textContent = `DAY ${G.day}`;
+  el.stars.textContent = '★'.repeat(G.wanted) + '☆'.repeat(5 - G.wanted);
+  el.cashLabel.textContent = `$${Math.floor(G.cash).toLocaleString('en-US')}`;
+  el.clockLabel.textContent = fmtTime(G.timeOfDay);
+  // PCPD panel.
+  const units = [...G.policeCars, ...G.footCops];
+  el.policeHead.textContent = `PCPD RESPONSE: ${units.length} UNITS${G.heli ? ' · AIR-1' : ''}`;
+  el.policeRows.innerHTML = units.slice(0, 6).map((u) => {
+    const d = Math.round(Math.hypot(u.x - G.player.x, u.z - G.player.z));
+    return `<div>${u.callsign || 'UNIT'} · ${d}m · ${u.policeCar ? 'RAMMING' : 'CHASING'}</div>`;
+  }).join('') + (units.length > 6 ? `<div>+${units.length - 6} more units</div>` : '');
+  // District + respect.
+  el.districtLabel.textContent = G.district;
+  const respect = G.stats.deliveries * 20 + G.stats.races * 30 + G.stats.photos * 10 + G.stats.fish * 5 + G.missionIdx * 50;
+  el.respectBar.style.width = `${Math.min(100, respect / 550 * 100)}%`;
+  el.respectLabel.textContent = `RESPECT · ${respect}/550`;
+  // Dialog.
+  if (G.dialog) {
+    el.dialogBox.style.display = 'flex';
+    el.dialogPortrait.textContent = (G.dialog.name || '?')[0];
+    el.dialogName.textContent = G.dialog.name + (G.dialog.role ? ` · ${G.dialog.role}` : '');
+    el.dialogText.textContent = G.dialog.text;
+  } else el.dialogBox.style.display = 'none';
+  // Context prompt.
+  let prompt = '';
+  const car = driveCarRef(G);
+  if (G.talkAvailable) prompt = 'E — Bicara';
+  else if (!car && G.nearestCarD < 3.5) prompt = 'E — Curi mobil';
+  else if (car) prompt = 'E — Keluar · R — Balapan · H — Klakson';
+  else if (G.nearFish) prompt = 'F — Mancing';
+  else if (G.nearPhoto) prompt = 'P — Foto';
+  el.prompt.textContent = prompt;
+  el.prompt.style.display = prompt ? 'block' : 'none';
+  // Center message.
+  if (G.centerMsgT > 0) {
+    G.centerMsgT -= dt;
+    el.centerMsg.textContent = G.centerMsgText || '';
+    el.centerMsg.style.display = 'block';
+  } else el.centerMsg.style.display = 'none';
+  // Radio.
+  el.radioLine.textContent = CFG.radio;
+  el.trackLine.textContent = CFG.tracks[G.audio ? G.audio.track : 0];
+  // Speedometer.
+  const kmh = Math.round(Math.abs(G.player.speed) * 3.6);
+  el.speedNum.textContent = String(kmh);
+  el.speedUnit.textContent = 'km/h';
+  el.speedGear.textContent = car ? `G${Math.min(5, 1 + Math.floor(Math.abs(car.speed) / 11))}` : '—';
+  el.speedCar.textContent = car ? car.name : 'JALAN KAKI';
+  el.speedCond.textContent = car ? `CONDITION ${Math.round(car.hp)}%` : '';
+  // Fishing bar.
+  if (G.fishing) {
+    el.fishingBar.style.display = 'block';
+    el.fishNeedle.style.left = `${G.fishing.needle * 100}%`;
+  } else el.fishingBar.style.display = 'none';
+  el.muteBtn.textContent = G.muted ? 'SUARA: MATI (M)' : 'SUARA: HIDUP (M)';
+  drawMinimap(G);
+}
+function drawMinimap(G) {
+  const cv = G.el.minimap;
+  const ctx = cv.getContext('2d');
+  const W = cv.width, k = W / 640;
+  const X = (x) => (x + 320) * k, Z = (z) => (z + 320) * k;
+  ctx.fillStyle = '#2f8fb0'; ctx.fillRect(0, 0, W, W);
+  ctx.fillStyle = '#d9c08a'; ctx.fillRect(X(-300), 0, (48) * k, W);
+  ctx.fillStyle = '#7d8590';
+  for (const cx of [-288, -180, -60, 60, 180, 288]) for (const cz of [-288, -180, -60, 60, 180, 288])
+    ctx.fillRect(X(cx - 53), Z(cz - 53), 106 * k, 106 * k);
+  ctx.fillStyle = '#8b8578'; ctx.fillRect(X(246), 0, 74 * k, W);
+  ctx.fillStyle = '#9a938a'; ctx.fillRect(X(96), Z(96), 72 * k, 72 * k);
+  ctx.strokeStyle = '#3d434b'; ctx.lineWidth = 14 * k;
+  for (const r of CFG.roads) {
+    ctx.beginPath(); ctx.moveTo(X(r), 0); ctx.lineTo(X(r), W); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, Z(r)); ctx.lineTo(W, Z(r)); ctx.stroke();
+  }
+  ctx.strokeStyle = '#ffd23d'; ctx.lineWidth = 1;
+  for (const r of CFG.roads) {
+    ctx.beginPath(); ctx.moveTo(X(r), 0); ctx.lineTo(X(r), W); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, Z(r)); ctx.lineTo(W, Z(r)); ctx.stroke();
+  }
+  for (const r of CFG.ringRoads) {
+    ctx.strokeStyle = '#3d434b'; ctx.lineWidth = 14 * k;
+    ctx.beginPath(); ctx.moveTo(X(r), 0); ctx.lineTo(X(r), W); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, Z(r)); ctx.lineTo(W, Z(r)); ctx.stroke();
+  }
+  ctx.strokeStyle = '#c8b898'; ctx.lineWidth = 10 * k;
+  ctx.beginPath(); ctx.moveTo(X(-258), 0); ctx.lineTo(X(-258), W); ctx.stroke();
+  const dot = (x, z, c, r) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(X(x), Z(z), r, 0, 7); ctx.fill(); };
+  dot(CFG.garage[0], CFG.garage[1], '#2eff8a', 4);
+  dot(CFG.spray[0], CFG.spray[1], '#c26bff', 4);
+  for (const s of PHOTO_SPOTS) dot(s.x, s.z, '#37e0ff', 3);
+  for (const c of G.traffic || []) dot(c.x, c.z, '#aaaaaa', 2);
+  for (const u of [...G.policeCars, ...G.footCops]) dot(u.x, u.z, '#ff2020', 3);
+  if (G.missionIdx < MISSIONS.length) {
+    const pulse = 4 + Math.sin(G.elapsed * 4) * 2;
+    dot(G.missionX, G.missionZ, '#ffd23d', pulse);
+  }
+  // Player arrow.
+  ctx.save();
+  ctx.translate(X(G.player.x), Z(G.player.z));
+  ctx.rotate(Math.atan2(Math.sin(G.player.heading), Math.cos(G.player.heading)) * -1 + Math.PI);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath(); ctx.fill();
+  ctx.restore();
 }
