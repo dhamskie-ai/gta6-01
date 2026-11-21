@@ -1,9 +1,15 @@
 # SOLARA BAY
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/dhamskie-ai/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 Open-world crime game 3D (three.js, offline, static files) — make.fun
 competition `gta6-01`. Play as Nico, back in Solara Bay: steal cars, outrun
 the PCPD, run 8 jobs for Marco and Lupe — taxi fares, street races, fishing
 off the pier, and photos of 6 hidden spots. Radio: CELESTE 98.1.
+
+Built for the [make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01).
 
 ## Play
 
