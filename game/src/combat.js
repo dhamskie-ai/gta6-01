@@ -1,137 +1,159 @@
-// Combat: fists / VESPER 72 / MAKO SMG, guards, health + armor, death.
+// Combat: fists + 4 guns, guards with simple chase-and-shoot AI,
+// muzzle flash, tracers, health/armor. R reloads only on foot.
 import * as THREE from 'three';
 import { WEAPONS } from './config.js';
-import { makePersonMesh } from './city.js';
-import { driveCarRef } from './player.js';
-import { keyPressed } from './input.js';
-import { sfx } from './audio.js';
+import { clamp, dist2, angDiff } from './random.js';
+import { wasPressed, isDown } from './input.js';
+import { addWanted } from './police.js';
+import { sfxShot, sfxPunch } from './audio.js';
 
-export function hurtPlayer(G, dmg) {
-  if (G.phase !== 'play' || dmg <= 0) return;
-  let left = dmg;
-  if (G.armor > 0) {
-    const absorbed = Math.min(G.armor, left);
-    G.armor -= absorbed; left -= absorbed;
+export function initCombat(G) {
+  G.player.weapon = 1; // VESPER
+  G.player.ammo = WEAPONS.map((w) => w.ammo);
+  G.player.fireT = 0;
+  G.guards = [];
+  G.gunfireT = 0;
+  // muzzle flash sprite + tracer line (reused)
+  const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: G.fx.glowTex,
+    color: 0xffd23a, transparent: true, opacity: 0, depthWrite: false }));
+  flash.scale.set(2, 2, 1);
+  G.fx.scene.add(flash);
+  G.combatFx = { flash, flashT: 0, tracer: null };
+}
+export function spawnGuards(G, x, z, n) {
+  for (let i = 0; i < n; i++) {
+    const g = new THREE.Group();
+    const dark = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.35), dark);
+    body.position.y = 1.05; body.castShadow = true; g.add(body);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36),
+      new THREE.MeshLambertMaterial({ color: 0xc98a5a }));
+    head.position.y = 1.65; g.add(head);
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), dark);
+    gun.position.set(0.3, 1.1, 0.3); g.add(gun);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), dark);
+    legs.position.y = 0.35; g.add(legs);
+    const gx = x + (i - 1) * 3, gz = z + (i % 2) * 3;
+    g.position.set(gx, 0, gz);
+    G.fx.scene.add(g);
+    G.guards.push({ mesh: g, x: gx, z: gz, hp: 50, heading: 0, shootT: 1 + i * 0.5 });
   }
-  G.health -= left;
-  if (G.health <= 0) {
-    G.health = 0;
-    const busted = G.wanted >= 5 && G.rng.f() < 0.25;
-    G.phase = 'over';
-    G.overKind = busted ? 'busted' : 'ko';
-    if (G.showOver) G.showOver(G.overKind);
-    sfx(G, 'fail');
+}
+function nearestEnemy(G, maxD, maxAng) {
+  const p = G.player;
+  const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+  let best = null, bd = maxD * maxD;
+  const targets = [];
+  for (const gd of G.guards) targets.push({ x: gd.x, z: gd.z, ref: gd, kind: 'guard' });
+  for (const u of G.cops) {
+    if (u.foot) targets.push({ x: u.x, z: u.z, ref: u, kind: 'cop' });
+    else if (u.car) targets.push({ x: u.car.x, z: u.car.z, ref: u, kind: 'copcar' });
   }
-}
-export function spawnGuards(G, spots) {
-  G.guards = G.guards || [];
-  for (const [x, z] of spots) {
-    const g = makePersonMesh(0x8a5a3a, 0x222222, 0x222222, 0x111111);
-    g.position.set(x, 0, z);
-    G.scene.add(g);
-    G.guards.push({ g, x, z, hp: 50, shootT: 1 + G.rng.f(), alive: true });
+  for (const t of targets) {
+    const dx = t.x - p.x, dz = t.z - p.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > bd) continue;
+    const d = Math.sqrt(d2) || 1;
+    const ang = Math.abs(angDiff(p.heading, Math.atan2(dx, dz)));
+    if (ang > maxAng) continue;
+    bd = d2; best = t;
   }
+  return best;
 }
-export function guardsAlive(G) { return (G.guards || []).filter((gu) => gu.alive).length; }
-function enemies(G) {
-  const list = [];
-  for (const gu of G.guards || []) if (gu.alive) list.push({ x: gu.x, z: gu.z, kind: 'guard', ref: gu });
-  for (const c of G.footCops || []) list.push({ x: c.x, z: c.z, kind: 'cop', ref: c });
-  return list;
+function damagePlayer(G, dmg) {
+  const p = G.player;
+  let rest = dmg;
+  if (p.armor > 0) { const ab = Math.min(p.armor, rest); p.armor -= ab; rest -= ab; }
+  p.health -= rest;
+  if (p.health <= 0) { p.health = 0; G.phase = 'dead'; }
 }
-function addTracer(G, from, to) {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(from[0], from[1], from[2]),
-    new THREE.Vector3(to[0], to[1], to[2]),
-  ]);
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffd23d, transparent: true, opacity: 0.9 }));
-  G.scene.add(line);
-  G.tracers = G.tracers || [];
-  G.tracers.push({ line, life: 0.08 });
-}
-export function shoot(G) {
-  const P = G.player;
-  const w = WEAPONS[P.weapon];
-  const px = P.x, pz = P.z;
-  const origin = [px, 1.4, pz];
-  if (P.weapon === 0) {
-    sfx(G, 'punch');
-    for (const e of enemies(G)) {
-      if (Math.hypot(e.x - px, e.z - pz) < 2) { damageEnemy(G, e, w.dmg); return; }
+function damageEnemy(G, t, dmg) {
+  if (t.kind === 'guard') {
+    t.ref.hp -= dmg;
+    if (t.ref.hp <= 0) {
+      G.fx.scene.remove(t.ref.mesh);
+      G.guards.splice(G.guards.indexOf(t.ref), 1);
     }
-    return;
-  }
-  if (P.ammo[P.weapon] <= 0) { sfx(G, 'click'); return; }
-  P.ammo[P.weapon]--;
-  sfx(G, 'shot');
-  const fx = Math.sin(P.heading), fz = Math.cos(P.heading);
-  let best = null, bd = w.range;
-  for (const e of enemies(G)) {
-    const dx = e.x - px, dz = e.z - pz, d = Math.hypot(dx, dz);
-    if (d > w.range) continue;
-    const dot = (dx * fx + dz * fz) / (d || 1);
-    if (dot < 0.9) continue; // must be roughly ahead
-    if (d < bd) { bd = d; best = e; }
-  }
-  const end = best ? [best.x, 1.2, best.z]
-    : [px + fx * w.range, 1.2, pz + fz * w.range];
-  addTracer(G, origin, end);
-  if (best) damageEnemy(G, best, w.dmg);
-}
-function damageEnemy(G, e, dmg) {
-  if (e.kind === 'guard') {
-    e.ref.hp -= dmg;
-    if (e.ref.hp <= 0 && e.ref.alive) {
-      e.ref.alive = false;
-      G.scene.remove(e.ref.g);
-      G.cash += 25;
-      G.stats.kills++;
-      G.centerMsg('Guard tumbang +$25', 1.5);
-      sfx(G, 'coin');
+  } else if (t.kind === 'cop') {
+    // foot cops go down, wanted +2
+    G.fx.scene.remove(t.ref.mesh);
+    G.cops.splice(G.cops.indexOf(t.ref), 1);
+    addWanted(G, 2);
+  } else if (t.kind === 'copcar') {
+    t.ref.car.hp -= dmg;
+    if (t.ref.car.hp <= 0) {
+      G.fx.scene.remove(t.ref.car.mesh);
+      G.cars.splice(G.cars.indexOf(t.ref.car), 1);
+      G.cops.splice(G.cops.indexOf(t.ref), 1);
+      addWanted(G, 2);
     }
-  } else if (e.kind === 'cop') {
-    // Foot cop goes down; that is a crime.
-    G.scene.remove(e.ref.g);
-    G.footCops.splice(G.footCops.indexOf(e.ref), 1);
-    G.cash += 25;
-    G.stats.kills++;
-    G.addWanted(1);
   }
 }
 export function updateCombat(G, dt) {
-  const P = G.player;
-  if (keyPressed(G, 'Digit1')) P.weapon = 0;
-  if (keyPressed(G, 'Digit2')) P.weapon = 1;
-  if (keyPressed(G, 'Digit3')) P.weapon = 2;
-  // R reloads only on foot; R in a car starts a race (missions.js).
-  if (keyPressed(G, 'KeyR') && !driveCarRef(G) && P.weapon > 0) {
-    P.ammo[P.weapon] = WEAPONS[P.weapon].ammo;
-    sfx(G, 'click');
-  }
-  if (keyPressed(G, 'Mouse0') || G.touchShoot) {
-    G.touchShoot = false;
-    if (!driveCarRef(G)) shoot(G);
-  }
-  // Guards: approach 2.6 m/s, shoot every ~1.6 s, 40% accuracy, 6 dmg.
-  for (const gu of G.guards || []) {
-    if (!gu.alive) continue;
-    const dx = P.x - gu.x, dz = P.z - gu.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 3) {
-      gu.x += (dx / d) * 2.6 * dt;
-      gu.z += (dz / d) * 2.6 * dt;
-    }
-    gu.g.position.set(gu.x, 0, gu.z);
-    gu.g.rotation.y = Math.atan2(dx, dz);
-    gu.shootT -= dt;
-    if (gu.shootT <= 0 && d < 45) {
-      gu.shootT = 1.6;
-      if (G.rng.f() < 0.4) { hurtPlayer(G, 6); sfx(G, 'shot'); }
+  const p = G.player;
+  const input = G.input;
+  G.gunfireT = Math.max(0, (G.gunfireT || 0) - dt);
+  p.fireT = Math.max(0, (p.fireT || 0) - dt);
+  // weapon select 1-5 (KESTREL locked until mission 7 done)
+  for (let i = 0; i < 5; i++) {
+    if (wasPressed(input, 'Digit' + (i + 1))) {
+      if (i === 4 && (G.stats.missionsDone || 0) < 7) { G.hudMsg = 'KESTREL locked — finish mission 7'; continue; }
+      if (i === 3 && G.cash < WEAPONS[3].price && p.ammo[3] === 0) { G.hudMsg = 'BREAKER costs $3,800'; continue; }
+      p.weapon = i;
     }
   }
-  for (const t of G.tracers || []) {
-    t.life -= dt;
-    if (t.life <= 0) { G.scene.remove(t.line); t.line.geometry.dispose(); }
+  // reload (on foot only — R is also the race key)
+  if (wasPressed(input, 'KeyR') && p.onFoot) {
+    const w = WEAPONS[p.weapon];
+    if (w.ammo !== Infinity) p.ammo[p.weapon] = w.ammo;
   }
-  G.tracers = (G.tracers || []).filter((t) => t.life > 0);
+  // fire
+  const firing = (isDown(input, 'Mouse0') || G.touch?.shoot) && p.fireT <= 0;
+  if (firing && p.onFoot) {
+    const w = WEAPONS[p.weapon];
+    p.fireT = w.rate;
+    if (p.weapon === 0) {
+      const t = nearestEnemy(G, w.range, 0.9);
+      if (t) { damageEnemy(G, t, w.dmg); if (G.audio) sfxPunch(G.audio); }
+      return;
+    }
+    if (p.ammo[p.weapon] <= 0) { G.hudMsg = 'Out of ammo — press R'; return; }
+    p.ammo[p.weapon]--;
+    G.gunfireT = 1;
+    addWanted(G, 1);
+    if (G.audio) sfxShot(G.audio);
+    const t = nearestEnemy(G, w.range, 0.35);
+    if (t) damageEnemy(G, t, w.dmg);
+    // muzzle flash + tracer
+    const fx = G.combatFx;
+    fx.flash.position.set(p.x + Math.sin(p.heading) * 1, 1.4, p.z + Math.cos(p.heading) * 1);
+    fx.flash.material.opacity = 0.9; fx.flashT = 0.06;
+    if (fx.tracer) { G.fx.scene.remove(fx.tracer); fx.tracer.geometry.dispose(); }
+    const end = t ? new THREE.Vector3(t.x, 1.2, t.z)
+      : new THREE.Vector3(p.x + Math.sin(p.heading) * w.range, 1.2, p.z + Math.cos(p.heading) * w.range);
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x, 1.4, p.z), end]);
+    fx.tracer = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe28a }));
+    G.fx.scene.add(fx.tracer);
+    setTimeout(() => { if (fx.tracer) { G.fx.scene.remove(fx.tracer); fx.tracer = null; } }, 60);
+  }
+  const fx = G.combatFx;
+  if (fx.flashT > 0) { fx.flashT -= dt; if (fx.flashT <= 0) fx.flash.material.opacity = 0; }
+  // guards AI: chase + shoot with limited accuracy
+  for (const gd of [...G.guards]) {
+    const d = Math.sqrt(dist2(gd.x, gd.z, p.x, p.z));
+    const desired = Math.atan2(p.x - gd.x, p.z - gd.z);
+    gd.heading += angDiff(gd.heading, desired) * Math.min(1, dt * 5);
+    if (d > 12) {
+      gd.x += Math.sin(gd.heading) * 3.2 * dt;
+      gd.z += Math.cos(gd.heading) * 3.2 * dt;
+    }
+    gd.mesh.position.set(gd.x, 0, gd.z);
+    gd.mesh.rotation.y = gd.heading;
+    gd.shootT -= dt;
+    if (d < 26 && gd.shootT <= 0) {
+      gd.shootT = 1.2;
+      if (G.rng() < 0.45) { damagePlayer(G, 8); if (G.audio) sfxShot(G.audio); }
+    }
+  }
 }

@@ -1,86 +1,78 @@
-// Screenshot runner for SOLARA BAY: Playwright headless, SwiftShader WebGL,
-// game served from disk on http://solarabay.game/ via page.route.
-// Usage: node tools/shot.mjs all | chase | drive | street | night | touch | roadzoom | phone
+// SOLARA BAY screenshot tool. Serves game/ from disk on :8080, opens it
+// in headless Chromium through the fake host http://solarabay.game/ (this
+// Chromium build blocks navigation to localhost), waits for
+// window.__shotReady, and saves a JPEG per scene. Seed 8, 1280x720.
+import { spawn } from 'node:child_process';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, extname, resolve, normalize, sep } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright/index.mjs';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const repo = resolve(join(here, '..'));
-const gameRoot = join(repo, 'game');
-const policyFile = '/tmp/webgl-policy.txt';
-const policyHash = createHash('sha256').update(readFileSync(policyFile)).digest('hex');
+const NODE = '/home/hatch/node22/node-v22.21.1-linux-x64/bin/node';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const POLICY = '/tmp/webgl-policy.txt';
+const policyHash = createHash('sha256').update(readFileSync(POLICY)).digest('hex');
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-};
+const SCENES = [
+  { name: 'chase', file: 'screenshots/1-chase.jpg', w: 1280, h: 720 },
+  { name: 'drive', file: 'screenshots/2-drive.jpg', w: 1280, h: 720 },
+  { name: 'street', file: 'screenshots/3-street.jpg', w: 1280, h: 720 },
+  { name: 'night', file: 'screenshots/4-night.jpg', w: 1280, h: 720 },
+  { name: 'touch', file: 'screenshots-touch/5-touch.jpg', w: 1280, h: 720, touch: true },
+  { name: 'road-zoom', file: 'screenshots-touch/6-road-zoom.jpg', w: 1280, h: 720 },
+  { name: 'phone', file: 'screenshots-touch/7-phone.jpg', w: 390, h: 844, touch: true },
+];
+const only = process.argv[2]; // optional single scene name
+const list = only ? SCENES.filter((s) => s.name === only) : SCENES;
+if (!list.length) { console.error('unknown scene', only); process.exit(2); }
 
-const SCENES = {
-  chase: { file: 'screenshots/1-chase.jpg', w: 1280, h: 720, shot: 'chase' },
-  drive: { file: 'screenshots/2-drive.jpg', w: 1280, h: 720, shot: 'drive' },
-  street: { file: 'screenshots/3-street.jpg', w: 1280, h: 720, shot: 'street' },
-  night: { file: 'screenshots/4-night.jpg', w: 1280, h: 720, shot: 'night' },
-  touch: { file: 'screenshots-touch/5-touch.jpg', w: 1280, h: 720, shot: 'touch', touch: true },
-  roadzoom: { file: 'screenshots-touch/6-road-zoom.jpg', w: 1280, h: 720, shot: 'roadzoom' },
-  phone: { file: 'screenshots-touch/7-phone.jpg', w: 390, h: 844, shot: 'phone', touch: true, iphone: true },
-};
+const server = spawn(NODE, ['serve.ts'], { cwd: ROOT, stdio: 'ignore' });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await sleep(1500);
 
-async function shoot(name) {
-  const sc = SCENES[name];
-  const browser = await chromium.launch({
-    executablePath: '/opt/meta-chromium/chrome',
-    env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', no_proxy: '*' },
-    args: [
-      '--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
-      '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
-      `--hatch-webgl-allowed-domains-sha256=${policyHash}`,
-    ],
-  });
-  const ctx = await browser.newContext({
-    viewport: { width: sc.w, height: sc.h },
-    hasTouch: !!sc.touch,
-    isMobile: !!sc.iphone,
-    userAgent: sc.iphone ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' : undefined,
-  });
-  const page = await ctx.newPage();
-  page.on('pageerror', (e) => console.error(`[${name}] pageerror:`, e.message));
-  page.on('console', (m) => { if (m.type() === 'error') console.error(`[${name}] console.error:`, m.text()); });
-  await page.route('**/solarabay.game/**', async (route) => {
-    const url = new URL(route.request().url());
-    let p = decodeURIComponent(url.pathname);
-    if (p.endsWith('/')) p += 'index.html';
-    const file = resolve(join(gameRoot, normalize(p)));
-    if (file !== gameRoot && !file.startsWith(gameRoot + sep)) return route.abort();
-    if (!existsSync(file)) return route.abort();
-    await route.fulfill({ status: 200, contentType: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', body: readFileSync(file) });
-  });
-  await page.goto(`http://solarabay.game/?shot=${sc.shot}&seed=8`, { waitUntil: 'load' });
-  await page.waitForFunction(() => window.__shotReady, undefined, { timeout: 240000 });
-  await page.waitForTimeout(400);
-  const out = join(repo, sc.file);
-  mkdirSync(join(out, '..'), { recursive: true });
-  await page.screenshot({ path: out, type: 'jpeg', quality: 85 });
-  console.log(`[${name}] wrote ${sc.file}`);
+let failed = 0;
+const browser = await chromium.launch({
+  executablePath: '/opt/meta-chromium/chrome',
+  env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*' },
+  args: ['--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
+    '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
+    `--hatch-webgl-allowed-domains-sha256=${policyHash}`],
+});
+try {
+  for (const scene of list) {
+    const errors = [];
+    const page = await browser.newPage({ viewport: { width: scene.w, height: scene.h },
+      hasTouch: !!scene.touch, isMobile: !!scene.touch });
+    page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+    page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+    await page.route('**/solarabay.game/**', async (route) => {
+      const url = new URL(route.request().url());
+      const target = 'http://127.0.0.1:8080' + url.pathname + url.search;
+      const res = await fetch(target);
+      const body = Buffer.from(await res.arrayBuffer());
+      await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') || undefined, body });
+    });
+    const q = `?shot=${scene.name}&seed=8` + (scene.touch ? '&touch=1' : '');
+    await page.goto('http://solarabay.game/' + q, { waitUntil: 'load', timeout: 60000 });
+    try {
+      await page.waitForFunction(() => window.__shotReady === true, null, { timeout: 180000 });
+    } catch {
+      errors.push('timeout waiting for __shotReady');
+    }
+    await sleep(1500);
+    const outPath = join(ROOT, scene.file);
+    mkdirSync(dirname(outPath), { recursive: true });
+    await page.screenshot({ path: outPath, type: 'jpeg', quality: 92, timeout: 180000 });
+    const size = readFileSync(outPath).length;
+    console.log(`${scene.name}: ${scene.file} ${size} bytes, errors=${errors.length}`);
+    for (const e of errors) console.log('  ' + e);
+    if (errors.length) failed++;
+    await page.close();
+  }
+} finally {
   await browser.close();
+  server.kill();
 }
-
-const arg = process.argv[2] || 'all';
-const names = arg === 'all' ? Object.keys(SCENES) : [arg];
-for (const n of names) {
-  if (!SCENES[n]) { console.error('unknown scene:', n); process.exit(1); }
-  await shoot(n);
-}
-console.log('done');
+console.log(failed ? `FAILED: ${failed} scene(s) with errors` : 'all scenes clean');
+process.exit(failed ? 1 : 0);

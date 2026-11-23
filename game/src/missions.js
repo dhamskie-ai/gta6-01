@@ -1,303 +1,325 @@
-// 8 story missions + side activities: taxi, street race, fishing, photo, courier.
+// 8 story missions + side activities (fishing, photo spots) + the Marco
+// NPC. State lives in G.msn — never G.mission (that name once shadowed
+// the state object and threw every frame).
 import * as THREE from 'three';
-import { CFG, MISSIONS, RACE_CP, COURIER_SPOTS, FISH_SPOTS, PHOTO_SPOTS, FISH } from './config.js';
-import { makeCar, isCarObj } from './vehicles.js';
-import { spawnNPC } from './traffic.js';
-import { driveCarRef } from './player.js';
-import { keyPressed } from './input.js';
-import { spawnGuards, guardsAlive } from './combat.js';
-import { setWanted } from './police.js';
-import { sfx } from './audio.js';
+import { CFG, MISSIONS } from './config.js';
+import { clamp, dist2, pick, angDiff } from './random.js';
+import { createCar, isCarObj } from './vehicles.js';
+import { showDialog, showObjective } from './hud.js';
+import { addWanted, setWanted } from './police.js';
+import { spawnGuards } from './combat.js';
+import { sfxMission, sfxHorn, sfxSplash, sfxCheer, sfxCoin } from './audio.js';
 
+const PHOTO_SPOTS = [
+  { x: -258, z: 20, label: 'Pier sunset' },
+  { x: 0, z: 0, label: 'Plaza Spires' },
+  { x: 60, z: 280, label: 'Ferris wheel' },
+];
+const FISH_SPOT = { x: -272, z: 26 };
+function marcoMesh() {
+  const g = new THREE.Group();
+  const blue = new THREE.MeshLambertMaterial({ color: 0x2a5a9a });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xc98a5a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.8, 0.36), blue);
+  body.position.y = 1.05; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.38), skin);
+  head.position.y = 1.68; g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.12, 8),
+    new THREE.MeshLambertMaterial({ color: 0xffd23a }));
+  cap.position.y = 1.88; g.add(cap);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3),
+    new THREE.MeshLambertMaterial({ color: 0x333333 }));
+  legs.position.y = 0.35; g.add(legs);
+  return g;
+}
 export function initMissions(G) {
-  G.missionIdx = 0; G.missionStage = 0; G.missionTimer = 0;
-  G.taxi = null; G.race = null; G.fishing = null; G.courier = null;
-  G.photosDone = [];
-  G.talkAvailable = false;
-  // Beacon: glowing pillar marking the current objective.
-  const beacon = new THREE.Group();
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 30, 10, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xffd23d, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
-  pillar.position.y = 15; beacon.add(pillar);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(3, 0.25, 8, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffd23d }));
-  ring.rotation.x = Math.PI / 2; ring.position.y = 0.3; beacon.add(ring);
-  G.scene.add(beacon);
+  G.msn = { idx: 0, step: 0, timer: 0, active: false, stepT: 0, followT: 0, race: null };
+  G.fish = { active: false, t: 0 };
+  G.stats.photos = 0; G.stats.fish = 0;
+  const mesh = marcoMesh();
+  mesh.position.set(CFG.marcoPos.x, 0, CFG.marcoPos.z);
+  mesh.rotation.y = Math.PI;
+  G.fx.scene.add(mesh);
+  G.marco = { mesh, x: CFG.marcoPos.x, z: CFG.marcoPos.z };
+  // mission beacon: golden column at the current target
+  const beacon = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 30, 10, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.35,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  beacon.position.set(-240, 15, 66);
+  G.fx.scene.add(beacon);
   G.beacon = beacon;
-  spawnNPC(G, 'Marco', -238, 64, 0x8a5a3a, 0x1e3a5e, 0x2c3242, 0x111111);
-  spawnNPC(G, 'Lupe', -272, 150, 0xc98a5e, 0xff2e7e, 0x2c3242, 0xffd23d);
-  startMission(G, 0);
 }
-export function showDialog(G, name, role, text) {
-  G.dialog = { name, role, text, t: 6 };
+function curDef(G) { return MISSIONS[G.msn.idx]; }
+function curStep(G) { const d = curDef(G); return d ? d.steps[G.msn.step] : null; }
+export function startMission(G, idx) {
+  if (idx >= MISSIONS.length) { G.msn.active = false; return; }
+  const d = MISSIONS[idx];
+  G.msn = { idx, step: 0, timer: d.timer || 0, active: true, stepT: 0, followT: 0, race: null };
+  showDialog(G, `${d.client}: ${d.brief}`);
+  showObjective(G, d.steps[0].label);
+  if (G.audio) sfxMission(G.audio);
+  enterStep(G);
 }
-export function startMission(G, i) {
-  const m = MISSIONS[i];
-  if (!m) { G.objective = 'Solara Bay is yours'; return; }
-  G.missionIdx = i; G.missionStage = 0;
-  G.missionTitle = m.title; G.missionNext = m.next;
-  G.missionTimer = m.timer || 0;
-  G.tailT = 0;
-  if (m.night) G.timeOfDay = m.night;
-  if (m.wantedOnStart) setWanted(G, m.wantedOnStart);
-  if (m.guards) { G.guards = []; spawnGuards(G, m.guards); }
-  if (i === 4) spawnCourier(G);
-  showDialog(G, m.brief.name, m.brief.role, m.brief.text);
-  updateObjective(G);
-}
-function updateObjective(G) {
-  const m = MISSIONS[G.missionIdx];
-  if (!m) return;
-  const s = m.steps[G.missionStage];
+function enterStep(G) {
+  const s = curStep(G);
   if (!s) return;
-  G.objective = s.label;
-  G.missionX = s.x; G.missionZ = s.z;
-  if (G.beacon) G.beacon.position.set(s.x, 0, s.z);
-}
-function nextStep(G) {
-  const m = MISSIONS[G.missionIdx];
-  if (m.steps[G.missionStage].k === 'tail' && G.courierCar) {
-    G.scene.remove(G.courierCar.group);
-    const i = G.cars.indexOf(G.courierCar); if (i >= 0) G.cars.splice(i, 1);
-    G.courierCar = null;
-  }
-  G.missionStage++;
-  if (G.missionStage >= m.steps.length) {
-    G.cash += m.reward;
-    G.centerMsg(`Misi selesai: ${m.title} +$${m.reward}`, 3.5);
-    sfx(G, 'jingle');
-    G.missionIdx++;
-    if (G.missionIdx >= MISSIONS.length) {
-      G.objective = 'Solara Bay is yours';
-      if (G.beacon) G.beacon.visible = false;
-      return;
-    }
-    startMission(G, G.missionIdx);
-    return;
-  }
-  const s = m.steps[G.missionStage];
-  if (s.k === 'kill') { /* guards already spawned */ }
-  if (s.k === 'race') startRace(G, true);
-  if (m.wantedOnDrive && s.k === 'drive' && G.missionStage === 2) setWanted(G, m.wantedOnDrive);
-  sfx(G, 'coin');
-  updateObjective(G);
-}
-function failMission(G, why) {
-  G.centerMsg(`${why} — misi diulang.`, 3);
-  sfx(G, 'fail');
-  if (G.race) { endRace(G); }
-  if (G.courierCar) { G.scene.remove(G.courierCar.group); G.courierCar = null; }
-  startMission(G, G.missionIdx);
+  G.msn.stepT = 0;
+  showObjective(G, s.label);
+  if (s.type === 'clear') spawnGuards(G, s.x, s.z, s.count || 3);
+  if (s.type === 'follow' || s.type === 'chase') spawnCourier(G);
+  if (s.type === 'race') startRace(G, s);
+  if (s.type === 'escape') setWanted(G, 4);
+  if (s.type === 'talk') showDialog(G, 'Marco: Nico! Over here — by the ceviche stand.');
 }
 function spawnCourier(G) {
-  const car = makeCar(G, 'sedan', 240, 120, Math.PI / 2);
-  car.courier = true; car.wp = 0;
-  G.cars.push(car);
-  G.courierCar = car;
-  G.courierPath = [[240, 120], [120, 120], [0, 120], [-120, 120], [-240, 120], [-240, 0], [-240, -120]];
+  if (G.courier) return;
+  const car = createCar(G, 'sedan', -210, 120, Math.PI / 2, 'courier', 0x222831);
+  G.courier = { car, state: 'follow' };
 }
-function dist2(G, x, z) { return Math.hypot(G.player.x - x, G.player.z - z); }
+function startRace(G, s) {
+  const rivals = [];
+  for (let i = 0; i < 2; i++) {
+    const car = createCar(G, 'sport', -120 + i * 6, 4 + i * 4, 0, 'rival',
+      i ? 0x2a9a8a : 0xc22030);
+    rivals.push({ car, cp: 0 });
+  }
+  G.msn.race = { cps: s.cps, cp: 0, rivals, won: false };
+  if (G.audio) sfxHorn(G.audio);
+}
+function nextStep(G) {
+  const d = curDef(G);
+  G.msn.step++;
+  if (G.msn.step >= d.steps.length) { completeMission(G); return; }
+  enterStep(G);
+}
+export function completeMission(G) {
+  const d = curDef(G);
+  G.cash += d.reward;
+  G.stats.missionsDone = (G.stats.missionsDone || 0) + 1;
+  showDialog(G, `${d.client}: Job done. +$${d.reward}`);
+  if (G.audio) sfxCheer(G.audio);
+  if (G.msn.idx === 6) G.hudMsg = 'KESTREL unlocked!';
+  if (G.msn.idx === 7) {
+    showDialog(G, 'Marco: We made it, Nico. The debt is paid — Solara Bay is ours.');
+    G.msn.active = false;
+    G.objective = 'Golden Hour complete — free roam!';
+    if (G.saveGame) G.saveGame();
+    return;
+  }
+  if (G.saveGame) G.saveGame();
+  startMission(G, G.msn.idx + 1);
+}
+export function failMission(G, why) {
+  showDialog(G, `Kip: ${why} — retrying ${curDef(G).name}.`);
+  startMission(G, G.msn.idx);
+}
 export function updateMissions(G, dt) {
-  if (G.phase !== 'play') return;
-  const m = MISSIONS[G.missionIdx];
-  if (m) {
-    if (m.timer) {
-      G.missionTimer -= dt;
-      if (G.missionTimer <= 0) { failMission(G, 'Waktu habis!'); return; }
+  const p = G.player;
+  // fishing timer
+  if (G.fish.active) {
+    G.fish.t -= dt;
+    if (G.fish.t <= 0) {
+      G.fish.active = false;
+      if (G.rng() < 0.65) {
+        const v = 10 + Math.floor(G.rng() * 31);
+        G.cash += v; G.stats.fish++;
+        G.hudMsg = `Caught a fish! +$${v}`;
+        if (G.audio) sfxCoin(G.audio);
+      } else G.hudMsg = 'The fish got away…';
     }
-    const s = m.steps[G.missionStage];
-    if (s) {
-      G.talkAvailable = false;
-      if (s.k === 'reach') {
-        if (dist2(G, s.x, s.z) < s.r) nextStep(G);
-      } else if (s.k === 'drive') {
-        const car = driveCarRef(G);
-        if (car && dist2(G, s.x, s.z) < s.r) nextStep(G);
-      } else if (s.k === 'talk') {
-        if (dist2(G, s.x, s.z) < 6) {
-          G.talkAvailable = dist2(G, s.x, s.z) < s.r;
-          if (G.talkAvailable && keyPressed(G, 'KeyE')) {
-            showDialog(G, s.x < -200 ? 'Marco' : 'Lupe', '', 'Ayo, Nico — gas!');
-            nextStep(G);
-          }
-        }
-      } else if (s.k === 'kill') {
-        if (guardsAlive(G) === 0) nextStep(G);
-      } else if (s.k === 'tail') {
-        updateTail(G, dt, s);
-      } else if (s.k === 'race') {
-        const res = updateRace(G, dt);
-        if (res === 'win') nextStep(G);
-        else if (res === 'lose') failMission(G, 'Rival menang!');
+  }
+  // beacon follows the current step target
+  const s = curStep(G);
+  if (s && s.x !== undefined && G.beacon) {
+    G.beacon.visible = !G.shotMode || true;
+    G.beacon.position.set(s.x, 15, s.z);
+    G.beacon.rotation.y += dt;
+  } else if (G.beacon) G.beacon.visible = false;
+  // near-interact prompt (talk / fish / photo)
+  G.nearInteract = null;
+  if (G.msn.active && s) {
+    if (s.type === 'talk' && dist2(p.x, p.z, G.marco.x, G.marco.z) < 25) {
+      G.nearInteract = { kind: 'talk', label: 'Bicara dengan Marco' };
+    }
+  }
+  if (dist2(p.x, p.z, FISH_SPOT.x, FISH_SPOT.z) < 16 && !G.fish.active) {
+    G.nearInteract = { kind: 'fish', label: 'Memancing (E)' };
+  }
+  for (const sp of PHOTO_SPOTS) {
+    if (dist2(p.x, p.z, sp.x, sp.z) < 16) {
+      G.nearInteract = { kind: 'photo', label: `Foto: ${sp.label} (E)`, spot: sp };
+      break;
+    }
+  }
+  if (!G.msn.active || G.phase !== 'play') return;
+  // mission timer
+  if (G.msn.timer > 0) {
+    G.msn.timer -= dt;
+    if (G.msn.timer <= 0) {
+      if (s && s.type === 'escape') { nextStep(G); return; }
+      failMission(G, 'Time ran out');
+      return;
+    }
+  }
+  if (!s) return;
+  const dPlayer = s.x !== undefined ? Math.sqrt(dist2(p.x, p.z, s.x, s.z)) : 1e9;
+  switch (s.type) {
+    case 'goto':
+      if (dPlayer < 7) nextStep(G);
+      break;
+    case 'steal':
+      if (isCarObj(p.car)) nextStep(G);
+      break;
+    case 'drive':
+      if (dPlayer < 7) nextStep(G);
+      break;
+    case 'clear':
+      if (G.guards.length === 0) nextStep(G);
+      break;
+    case 'stealTruck':
+      if (isCarObj(p.car) && p.car.type === 'truck') {
+        addWanted(G, 2);
+        nextStep(G);
       }
-    }
-    if (G.beacon && G.beacon.visible) {
-      G.beacon.children[1].rotation.z += dt;
-      G.beacon.children[0].material.opacity = 0.25 + Math.sin(G.elapsed * 3) * 0.12;
-    }
-  }
-  updateActivities(G, dt);
-  if (G.dialog) { G.dialog.t -= dt; if (G.dialog.t <= 0) G.dialog = null; }
-}
-function updateTail(G, dt, s) {
-  const c = G.courierCar;
-  if (!isCarObj(c)) return;
-  const wp = G.courierPath[c.wp];
-  const dx = wp[0] - c.x, dz = wp[1] - c.z, d = Math.hypot(dx, dz);
-  if (d < 4) c.wp = (c.wp + 1) % G.courierPath.length;
-  else {
-    c.heading = Math.atan2(dx, dz);
-    c.x += Math.sin(c.heading) * 12 * dt;
-    c.z += Math.cos(c.heading) * 12 * dt;
-    c.group.position.set(c.x, 0, c.z);
-    c.group.rotation.y = c.heading;
-  }
-  const pd = Math.hypot(G.player.x - c.x, G.player.z - c.z);
-  if (pd < 8) { failMission(G, 'Spotted!'); return; }
-  if (pd < 40) {
-    G.tailT += dt;
-    if (G.tailT > 12) nextStep(G);
-  }
-}
-// ---- street race (mission + free activity) ----
-export function startRace(G, forMission) {
-  if (G.race) return;
-  const mk = (type, x, z) => {
-    const car = makeCar(G, type, x, z, 0);
-    car.racer = true; car.cp = 0;
-    G.cars.push(car);
-    return car;
-  };
-  G.race = {
-    cps: RACE_CP, idx: 0, forMission,
-    rivals: [mk('sport', -4, -186), mk('sedan', 4, -186)],
-  };
-  G.centerMsg(forMission ? 'Balapan! Lewati 3 checkpoint — kalahkan 2 rival!' : 'Balapan jalanan! 3 checkpoint, $120 untuk pemenang!', 3);
-}
-function endRace(G) {
-  if (!G.race) return;
-  for (const r of G.race.rivals) {
-    G.scene.remove(r.group);
-    const i = G.cars.indexOf(r); if (i >= 0) G.cars.splice(i, 1);
-  }
-  G.race = null;
-}
-function updateRace(G, dt) {
-  const r = G.race;
-  if (!r) return null;
-  const car = driveCarRef(G);
-  if (car) {
-    const [cx, cz] = r.cps[r.idx];
-    if (Math.hypot(car.x - cx, car.z - cz) < 10) {
-      r.idx++;
-      sfx(G, 'coin');
-      if (r.idx >= r.cps.length) {
-        const won = true;
-        endRace(G);
-        if (!r.forMission) { G.cash += CFG.racePrize; G.stats.races++; G.centerMsg(`Menang balapan +$${CFG.racePrize}!`, 3); sfx(G, 'jingle'); }
-        return 'win';
+      break;
+    case 'follow': updateCourier(G, dt, 'follow'); break;
+    case 'chase': updateCourier(G, dt, 'chase'); break;
+    case 'race': updateRace(G, dt, s); break;
+    case 'party':
+      if (dPlayer < 10) {
+        G.msn.stepT += dt;
+        if (G.msn.stepT >= (s.dur || 5)) nextStep(G);
       }
-    }
+      break;
+    case 'escape':
+      // timer expiry advances (handled above); staying alive is enough
+      break;
+    case 'boat':
+      if (dPlayer < 8) nextStep(G);
+      break;
+    case 'talk':
+      break; // advances via E (onPlayerInteract)
   }
-  for (const rv of r.rivals) {
-    const [cx, cz] = r.cps[rv.cp];
-    const dx = cx - rv.x, dz = cz - rv.z, d = Math.hypot(dx, dz);
+}
+function updateCourier(G, dt, mode) {
+  const c = G.courier;
+  if (!c || !isCarObj(c.car)) return;
+  const p = G.player;
+  const car = c.car;
+  const d = Math.sqrt(dist2(car.x, car.z, p.x, p.z));
+  if (mode === 'follow') {
+    // cruise slowly along the coast road; spotted if the player gets close
+    car.speed = 8;
+    car.heading += clamp(angDiff(car.heading, Math.PI / 2), -0.5, 0.5) * dt * 2;
+    car.x += Math.sin(car.heading) * car.speed * dt;
+    car.z += Math.cos(car.heading) * car.speed * dt;
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.heading;
+    G.msn.followT += dt;
+    if (d < 12) { showDialog(G, 'Courier: Hey — you\'re following me!'); nextStep(G); }
+    else if (G.msn.followT >= 20) nextStep(G);
+  } else {
+    // chase: courier flees toward the docks; catch him within 8 m
+    const tx = 120, tz = -120;
+    const desired = Math.atan2(tx - car.x, tz - car.z);
+    car.heading += clamp(desired - car.heading, -1.2 * dt, 1.2 * dt);
+    car.speed = 26;
+    car.x += Math.sin(car.heading) * car.speed * dt;
+    car.z += Math.cos(car.heading) * car.speed * dt;
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.heading;
     if (d < 8) {
-      rv.cp++;
-      if (rv.cp >= r.cps.length) {
-        endRace(G);
-        if (!r.forMission) G.centerMsg('Rival menang — balapan kalah.', 3);
-        return 'lose';
-      }
-      continue;
+      showDialog(G, 'Kip: Got him. The drop point is yours.');
+      G.fx.scene.remove(car.mesh);
+      G.cars.splice(G.cars.indexOf(car), 1);
+      G.courier = null;
+      nextStep(G);
     }
-    rv.heading = Math.atan2(dx, dz);
-    const sp = rv.type === 'sport' ? 30 : 26;
-    rv.x += Math.sin(rv.heading) * sp * dt;
-    rv.z += Math.cos(rv.heading) * sp * dt;
-    rv.group.position.set(rv.x, 0, rv.z);
-    rv.group.rotation.y = rv.heading;
   }
-  return null;
 }
-// ---- side activities ----
-function updateActivities(G, dt) {
-  // Taxi (T on foot).
-  if (keyPressed(G, 'KeyT') && !driveCarRef(G) && !G.taxi) {
-    const a = G.rng.f() * Math.PI * 2;
-    const x = G.player.x + Math.cos(a) * 12, z = G.player.z + Math.sin(a) * 12;
-    const mesh = spawnNPC(G, 'Passenger', x, z, 0xe8b88a, 0xf5c518, 0x2c3242, 0);
-    G.taxi = { stage: 'pickup', x, z, mesh };
-    G.centerMsg('Penumpang taksi menunggu — jemput dengan mobil!', 3);
-  }
-  if (G.taxi) {
-    const car = driveCarRef(G);
-    if (G.taxi.stage === 'pickup' && car && Math.hypot(car.x - G.taxi.x, car.z - G.taxi.z) < 6) {
-      G.scene.remove(G.taxi.mesh.g);
-      G.taxi.stage = 'deliver';
-      G.centerMsg('Penumpang naik — antar ke Plaza Spires!', 3);
-    } else if (G.taxi.stage === 'deliver' && car && Math.hypot(car.x - 108, car.z - 108) < 8) {
-      G.cash += CFG.taxiFare; G.stats.deliveries++;
-      G.centerMsg(`Taksi selesai +$${CFG.taxiFare}`, 3);
-      sfx(G, 'coin');
-      G.taxi = null;
+function updateRace(G, dt, s) {
+  const race = G.msn.race;
+  if (!race) return;
+  const p = G.player;
+  // player checkpoints
+  const cp = race.cps[race.cp];
+  if (cp && Math.sqrt(dist2(p.x, p.z, cp[0], cp[1])) < 10) {
+    race.cp++;
+    G.hudMsg = `Checkpoint ${race.cp}/${race.cps.length}`;
+    if (race.cp >= race.cps.length) {
+      const rivalBest = Math.max(...race.rivals.map((r) => r.cp));
+      if (race.cp > rivalBest || race.rivals.every((r) => r.cp < race.cps.length)) {
+        G.cash += 120; G.hudMsg = 'Race won! +$120 bonus';
+        if (G.audio) sfxCheer(G.audio);
+      }
+      cleanupRace(G);
+      nextStep(G);
+      return;
     }
   }
-  // Free race (R in car).
-  if (keyPressed(G, 'KeyR') && driveCarRef(G) && !G.race) startRace(G, false);
-  if (G.race && !G.race.forMission) updateRace(G, dt);
-  // Fishing (F at a fish spot).
-  if (keyPressed(G, 'KeyF')) {
-    if (!G.fishing) {
-      const spot = FISH_SPOTS.find((s) => Math.hypot(G.player.x - s.x, G.player.z - s.z) < 8);
-      if (spot) { G.fishing = { needle: 0, dir: 1 }; sfx(G, 'splash'); }
-    } else {
-      const n = G.fishing.needle;
-      if (n >= 0.62 && n <= 0.86) {
-        const fish = G.rng.pick(FISH);
-        G.cash += CFG.fishPrice; G.stats.fish++;
-        G.centerMsg(`Dapat ${fish.name} (${fish.w} kg) +$${CFG.fishPrice}!`, 3);
-        sfx(G, 'coin');
-      } else G.centerMsg('Ikan lepas…', 2);
-      G.fishing = null;
+  // rivals drive the checkpoint loop
+  for (const r of race.rivals) {
+    if (r.cp >= race.cps.length) continue;
+    const t = race.cps[r.cp];
+    const car = r.car;
+    const desired = Math.atan2(t[0] - car.x, t[1] - car.z);
+    car.heading += clamp(desired - car.heading, -1.5 * dt, 1.5 * dt);
+    car.speed = 27;
+    car.x += Math.sin(car.heading) * car.speed * dt;
+    car.z += Math.cos(car.heading) * car.speed * dt;
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.heading;
+    if (Math.sqrt(dist2(car.x, car.z, t[0], t[1])) < 10) r.cp++;
+  }
+}
+function cleanupRace(G) {
+  const race = G.msn.race;
+  if (!race) return;
+  for (const r of race.rivals) {
+    G.fx.scene.remove(r.car.mesh);
+    G.cars.splice(G.cars.indexOf(r.car), 1);
+  }
+  G.msn.race = null;
+}
+export function onPlayerInteract(G, kind, target) {
+  if (kind === 'enterCar') {
+    const s = curStep(G);
+    if (s && s.type === 'stealTruck' && target && target.type === 'truck') return false;
+    return false;
+  }
+  if (kind === 'exitCar') return false;
+  if (kind !== 'interact') return false;
+  const ni = G.nearInteract;
+  if (!ni) return false;
+  if (ni.kind === 'talk') {
+    const s = curStep(G);
+    if (s && s.type === 'talk') {
+      showDialog(G, 'Marco: The boat sails at golden hour. Lose the cops, get to the pier, and we\'re rich.');
+      nextStep(G);
+      return true;
     }
   }
-  if (G.fishing) {
-    G.fishing.needle += G.fishing.dir * 1.6 * dt;
-    if (G.fishing.needle >= 1) { G.fishing.needle = 1; G.fishing.dir = -1; }
-    if (G.fishing.needle <= 0) { G.fishing.needle = 0; G.fishing.dir = 1; }
+  if (ni.kind === 'fish') {
+    G.fish = { active: true, t: 6 };
+    G.hudMsg = 'Fishing… wait for a bite';
+    if (G.audio) sfxSplash(G.audio);
+    return true;
   }
-  // Photo (P at a photo spot).
-  if (keyPressed(G, 'KeyP')) {
-    const spot = PHOTO_SPOTS.find((s) => Math.hypot(G.player.x - s.x, G.player.z - s.z) < 10);
-    if (spot && !G.photosDone.includes(spot.name)) {
-      G.photosDone.push(spot.name);
-      G.cash += 10; G.stats.photos++;
-      sfx(G, 'camera');
-      if (G.photosDone.length === 6) {
-        G.cash += CFG.photoBonus;
-        G.centerMsg(`6/6 foto! Bonus +$${CFG.photoBonus}!`, 3.5);
-        sfx(G, 'jingle');
-      } else G.centerMsg(`Foto ${spot.name} +$10 (${G.photosDone.length}/6)`, 2.5);
-    }
+  if (ni.kind === 'photo') {
+    G.cash += 10; G.stats.photos++;
+    G.hudMsg = `Photo snapped! +$10 (${ni.spot.label})`;
+    if (G.audio) sfxCoin(G.audio);
+    return true;
   }
-  // Courier (K).
-  if (keyPressed(G, 'KeyK') && !G.courier) {
-    const [x, z] = G.rng.pick(COURIER_SPOTS);
-    G.courier = { x, z, t: 90 };
-    G.centerMsg(`Paket kilat: antar ke (${x}, ${z}) dalam 90 detik!`, 3);
-  }
-  if (G.courier) {
-    G.courier.t -= dt;
-    const car = driveCarRef(G);
-    if (car && Math.hypot(car.x - G.courier.x, car.z - G.courier.z) < 8) {
-      G.cash += CFG.courierPay;
-      G.centerMsg(`Paket sampai +$${CFG.courierPay}!`, 3);
-      sfx(G, 'coin');
-      G.courier = null;
-    } else if (G.courier.t <= 0) {
-      G.centerMsg('Paket kilat gagal — waktu habis.', 2.5);
-      G.courier = null;
-    }
-  }
+  return false;
+}
+export function missionLabel(G) {
+  if (!G.msn.active) return 'FREE ROAM';
+  const d = curDef(G);
+  return `JOB ${G.msn.idx + 1}/8 ${d.name}`;
+}
+export function missionStage(G) {
+  if (!G.msn.active) return '';
+  const d = curDef(G);
+  return `STAGE ${G.msn.step + 1}/${d.steps.length}`;
 }

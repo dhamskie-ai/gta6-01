@@ -1,177 +1,153 @@
-// Playtest SOLARA BAY (gta6-01, ronde 6g): Playwright headless, game
-// diserve dari disk di http://solarabay.game/ (lihat tools/shot.mjs).
-// Desktop: boot -> title -> play -> jalan -> curi VELOZ -> drive ->
-// keluar mobil, 0 console/page error. Sentuh: konteks hasTouch, joystick
-// CDP touch drag gerakkan pemain -> tombol MASUK -> nyetir pakai joystick
-// -> keluar mobil. Keluar 1 bila ada langkah FAIL atau error.
-//   node tools/playtest.mjs            (desktop 6 langkah)
-//   node tools/playtest.mjs --touch    (sentuh 4 langkah)
-import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync } from 'node:fs';
+// SOLARA BAY playtest: desktop (title -> walk -> steal VELOZ -> drive ->
+// exit) plus a touch-mode check (joystick moves the player). Same Chromium
+// + solarabay.game route method as tools/shot.mjs. Exits non-zero on any
+// console/page error or failed step.
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, dirname, extname, resolve } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chromium } from '/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright/index.mjs';
 
-const require = createRequire(import.meta.url);
-const { chromium } = require('/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright');
-
-const here = dirname(fileURLToPath(import.meta.url));
-const repo = resolve(here, '..');
-const gameDir = join(repo, 'game');
-const touchOnly = process.argv.includes('--touch');
-
-const POLICY = '/tmp/webgl-policy.txt';
-const policyText = 'hatch-webgl-allowed-domains-v1\nsolarabay.game\n';
-writeFileSync(POLICY, policyText);
-const policyHash = createHash('sha256').update(policyText).digest('hex');
-if (readFileSync(POLICY, 'utf8') !== policyText) throw new Error('webgl policy file mismatch');
-
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
-const ARGS = ['--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-proxy-server',
-  '--autoplay-policy=no-user-gesture-required',
-  `--hatch-webgl-allowed-domains-file=${POLICY}`, `--hatch-webgl-allowed-domains-sha256=${policyHash}`];
-const ENV = { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NO_PROXY: '*' };
-
-const results = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`);
-}
+const NODE = '/home/hatch/node22/node-v22.21.1-linux-x64/bin/node';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const policyHash = createHash('sha256').update(readFileSync('/tmp/webgl-policy.txt')).digest('hex');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const errors = [];
+function norm(a) { let d = a % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
 
-async function serveRoute(route) {
-  const url = new URL(route.request().url());
-  let rel = decodeURIComponent(url.pathname);
-  if (rel === '/' || rel.endsWith('/')) rel += 'index.html';
-  const file = join(gameDir, rel);
-  if (!file.startsWith(gameDir)) return route.abort();
-  try {
-    await route.fulfill({ status: 200, contentType: MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', body: readFileSync(file) });
-  } catch { await route.fulfill({ status: 404, body: 'not found' }); }
+const server = spawn(NODE, ['serve.ts'], { cwd: ROOT, stdio: 'ignore' });
+await sleep(1500);
+const browser = await chromium.launch({
+  executablePath: '/opt/meta-chromium/chrome',
+  env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*' },
+  args: ['--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
+    '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
+    `--hatch-webgl-allowed-domains-sha256=${policyHash}`],
+});
+let failed = 0;
+function check(name, ok, detail) {
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  if (!ok) failed++;
 }
-
-const browser = await chromium.launch({ executablePath: '/opt/meta-chromium/chrome', args: ARGS, env: ENV });
-let failures = 0;
 try {
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 720 },
-    hasTouch: touchOnly,
-    isMobile: touchOnly,
+  const page = await browser.newPage({ viewport: { width: 800, height: 450 } });
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.route('**/solarabay.game/**', async (route) => {
+    const url = new URL(route.request().url());
+    const res = await fetch('http://127.0.0.1:8080' + url.pathname + url.search);
+    const body = Buffer.from(await res.arrayBuffer());
+    await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') || undefined, body });
   });
-  const page = await context.newPage();
-  const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  await page.route('**/solarabay.game/**', serveRoute);
-  const game = () => page.evaluate(() => window.__game || null);
-  const pos = async () => { const g = await game(); return g ? [g.px, g.pz] : null; };
-
-  await page.goto('http://solarabay.game/?seed=1', { waitUntil: 'load', timeout: 120000 });
-  await page.waitForFunction(() => window.__game && window.__game.ready, { timeout: 240000 });
-  check('boot', true, 'window.__game ready');
-
-  const titleState = (await game()).state;
-  check('title', titleState === 'title', `state=${titleState}`);
-  await page.click('#btn-new');
-  await page.waitForFunction(() => window.__game.state === 'playing', { timeout: 60000 });
-  check('play', true, 'state=playing');
-
-  if (!touchOnly) {
-    const p0 = await pos();
-    await page.keyboard.down('KeyW');
-    await sleep(2500);
-    await page.keyboard.up('KeyW');
-    const p1 = await pos();
-    const moved = p0 && p1 && Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 1.5;
-    check('jalan kaki (W)', !!moved, `moved ${moved ? Math.hypot(p1[0] - p0[0], p1[1] - p0[1]).toFixed(1) : 0}m`);
-
-    // Jalan mendekat ke VELOZ sampai < 4 m (diukur live, tahan fps rendah).
-    await page.keyboard.down('KeyW');
-    for (let i = 0; i < 40; i++) {
-      await sleep(400);
-      if ((await game()).distToMissionCar < 4) break;
+  await page.goto('http://solarabay.game/?seed=8', { waitUntil: 'load', timeout: 60000 });
+  await sleep(3000);
+  let g = await page.evaluate(() => window.__game);
+  check('boot', !!g && g.phase === 'title', `phase=${g?.phase}`);
+  await page.evaluate(() => document.getElementById('btn-new').click());
+  await sleep(2000);
+  g = await page.evaluate(() => window.__game);
+  check('new game starts', g.phase === 'play', `phase=${g.phase}`);
+  const start = { x: g.x, z: g.z };
+  // --- autopilot: steer toward a target with W + A/D ---
+  const held = new Set();
+  async function setKeys(want) {
+    for (const k of ['w', 'a', 's', 'd']) {
+      if (want.includes(k) && !held.has(k)) { await page.keyboard.down(k); held.add(k); }
+      if (!want.includes(k) && held.has(k)) { await page.keyboard.up(k); held.delete(k); }
     }
-    await page.keyboard.up('KeyW');
-    await page.keyboard.press('KeyE');
-    await sleep(1200);
-    const g1 = await game();
-    check('curi VELOZ (E)', g1.driving === true, `driving=${g1.driving} car=${g1.car}`);
-
-    const c0 = await pos();
-    await page.keyboard.down('KeyW');
-    await sleep(3000);
-    await page.keyboard.up('KeyW');
-    const c1 = await pos();
-    const drove = c0 && c1 && Math.hypot(c1[0] - c0[0], c1[1] - c0[1]) > 5;
-    check('drive (W 3s)', !!drove, `drove ${drove ? Math.hypot(c1[0] - c0[0], c1[1] - c0[1]).toFixed(1) : 0}m speed=${(await game()).speed}km/h`);
-
-    await page.keyboard.press('KeyE');
-    await sleep(1200);
-    const g2 = await game();
-    check('keluar mobil (E)', g2.driving === false, `driving=${g2.driving}`);
-  } else {
-    const touchVisible = await page.evaluate(() => {
-      const el = document.querySelector('#touch-ui');
-      return !!el && getComputedStyle(el).display !== 'none';
-    });
-    check('kontrol sentuh tampil', touchVisible, touchVisible ? '' : '#touch-ui hidden');
-
-    // Joystick: drag sentuh ke atas (maju) lewat CDP touch events.
-    const joy = await page.evaluate(() => {
-      const el = document.querySelector('#joy-base');
-      const r = el.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-    });
-    const cdp = await context.newCDPSession(page);
-    const p0 = await pos();
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: joy.x, y: joy.y, id: 1 }] });
-    for (let i = 0; i < 40; i++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: joy.x, y: joy.y - 42, id: 1 }] });
-      await sleep(400);
-      if ((await game()).distToMissionCar < 4) break;
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    const p1 = await pos();
-    const moved = p0 && p1 && Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 1.5;
-    check('joystick gerakkan pemain', !!moved, `moved ${moved ? Math.hypot(p1[0] - p0[0], p1[1] - p0[1]).toFixed(1) : 0}m`);
-
-    await page.touchscreen.tap(640, 360); // pastikan fokus game
-    const enterBtn = await page.evaluate(() => {
-      const el = document.querySelector('#btn-enter');
-      const r = el.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-    });
-    await page.touchscreen.tap(enterBtn.x, enterBtn.y);
-    await sleep(1500);
-    const g1 = await game();
-    check('tombol MASUK mobil', g1.driving === true, `driving=${g1.driving} car=${g1.car}`);
-
-    const c0 = await pos();
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: joy.x, y: joy.y, id: 2 }] });
-    let drove = false, droveDist = 0;
-    for (let i = 0; i < 40; i++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: joy.x, y: joy.y - 42, id: 2 }] });
-      await sleep(400);
-      const cc = await pos();
-      if (cc && c0) {
-        droveDist = Math.hypot(cc[0] - c0[0], cc[1] - c0[1]);
-        if (droveDist > 5) { drove = true; break; }
-      }
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    const c1 = await pos();
-    check('nyetir pakai joystick', drove, `drove ${droveDist.toFixed(1)}m`);
-
-    await page.touchscreen.tap(enterBtn.x, enterBtn.y);
-    await sleep(1200);
-    const g2 = await game();
-    check('tombol KELUAR mobil', g2.driving === false, `driving=${g2.driving}`);
   }
+  async function driveTo(tx, tz, timeoutMs, arriveD) {
+    const t0 = Date.now();
+    let lastPos = null, lastMove = Date.now(), reversing = 0;
+    while (Date.now() - t0 < timeoutMs) {
+      g = await page.evaluate(() => window.__game);
+      const dx = tx - g.x, dz = tz - g.z;
+      const d = Math.hypot(dx, dz);
+      if (d < arriveD) return { ok: true, d };
+      if (lastPos && Math.hypot(g.x - lastPos.x, g.z - lastPos.z) > 0.1) lastMove = Date.now();
+      lastPos = { x: g.x, z: g.z };
+      if (Date.now() - lastMove > 30000 && reversing <= 0) {
+        reversing = 3000;
+        console.log('  stuck — reversing');
+      }
+      const desired = Math.atan2(dx, dz);
+      const diff = norm(desired - g.heading);
+      let keys = ['w'];
+      if (reversing > 0) { keys = ['s']; if (diff > 0) keys.push('d'); else keys.push('a'); reversing -= 800; }
+      else if (diff > 0.18) keys.push('d');
+      else if (diff < -0.18) keys.push('a');
+      await setKeys(keys);
+      await sleep(800);
+    }
+    await setKeys([]);
+    return { ok: false, d: Math.hypot(tx - g.x, tz - g.z) };
+  }
+  // walk to the VELOZ (-240, 66)
+  const walk = await driveTo(-240, 66, 180000, 3.2);
+  await setKeys([]);
+  g = await page.evaluate(() => window.__game);
+  const walked = Math.hypot(g.x - start.x, g.z - start.z);
+  check('walk to VELOZ', walk.ok, `walked ${walked.toFixed(1)} m, dist ${walk.d?.toFixed(1)}`);
+  // steal it
+  await page.keyboard.press('e');
+  await sleep(2500);
+  g = await page.evaluate(() => window.__game);
+  check('steal VELOZ (inCar)', g.inCar === true, `inCar=${g.inCar} msn=${g.msn} step=${g.step}`);
+  // drive south down the Malecón to (-240, -60)
+  const d1 = await driveTo(-240, -60, 240000, 8);
+  await setKeys([]);
+  g = await page.evaluate(() => window.__game);
+  const driven = Math.hypot(g.x - start.x, g.z - start.z);
+  check('drive leg 1', d1.ok, `dist ${d1.d.toFixed(1)} speed ${g.speed} km/h`);
+  check('drove far', driven > 100, `displacement ${driven.toFixed(1)} m`);
+  // exit the car
+  await page.keyboard.press('e');
+  await sleep(2000);
+  g = await page.evaluate(() => window.__game);
+  check('exit car', g.onFoot === true && g.inCar === false, `onFoot=${g.onFoot}`);
+  check('mission advanced', g.msn === 0 && g.step >= 2, `msn=${g.msn} step=${g.step}`);
+  await page.close();
 
-  check('0 console/page error', errors.length === 0, errors.length ? errors.slice(0, 5).join(' | ') : `${results.length} langkah`);
+  // --- touch mode ---
+  const tp = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  tp.on('console', (m) => { if (m.type() === 'error') errors.push('touch console: ' + m.text()); });
+  tp.on('pageerror', (e) => errors.push('touch pageerror: ' + e.message));
+  await tp.route('**/solarabay.game/**', async (route) => {
+    const url = new URL(route.request().url());
+    const res = await fetch('http://127.0.0.1:8080' + url.pathname + url.search);
+    const body = Buffer.from(await res.arrayBuffer());
+    await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') || undefined, body });
+  });
+  await tp.goto('http://solarabay.game/?seed=8&touch=1', { waitUntil: 'load', timeout: 60000 });
+  await sleep(3000);
+  const touchVisible = await tp.evaluate(() => {
+    const el = document.getElementById('touch-controls');
+    return el && !el.classList.contains('hidden');
+  });
+  check('touch controls visible', touchVisible);
+  await tp.evaluate(() => document.getElementById('btn-new').click());
+  await sleep(2000);
+  const t0 = await tp.evaluate(() => window.__game);
+  // drag the joystick upward (pointer events drive it)
+  const joy = await tp.evaluate(() => {
+    const r = document.getElementById('joy-base').getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await tp.mouse.move(joy.x, joy.y);
+  await tp.mouse.down();
+  await tp.mouse.move(joy.x, joy.y - 40, { steps: 5 });
+  await sleep(6000);
+  await tp.mouse.up();
+  const t1 = await tp.evaluate(() => window.__game);
+  const moved = Math.hypot(t1.x - t0.x, t1.z - t0.z);
+  check('touch joystick moves player', moved > 1, `moved ${moved.toFixed(1)} m`);
+  await tp.close();
 } finally {
   await browser.close();
+  server.kill();
 }
-failures = results.filter((r) => !r.ok).length;
-console.log(failures === 0 ? 'PLAYTEST ALL PASS' : `PLAYTEST ${failures} FAIL`);
-process.exit(failures === 0 ? 0 : 1);
+if (errors.length) { console.log('ERRORS:'); for (const e of errors) console.log('  ' + e); }
+check('0 console/page errors', errors.length === 0, `${errors.length} errors`);
+console.log(failed ? `PLAYTEST FAILED (${failed})` : 'PLAYTEST PASSED');
+process.exit(failed || errors.length ? 1 : 0);
