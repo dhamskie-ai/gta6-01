@@ -1,49 +1,29 @@
-# SOLARA BAY — Visual Upgrade Plan (applied in this build)
+# Visual upgrade plan — SOLARA BAY (round 7c)
 
-Target look: the reference frame Dham sent — a neon-soaked sunset chase:
-pink sports car, police cars + helicopter, palm-lined boulevard, glowing
-billboards, rich HUD (mission panel, police response list, circular minimap,
-radio readout, big speedometer, character-portrait dialogue).
+Dense-world upgrade from Dham's 6j note: "mobilnya sepi banget, tambahin
+mobil-mobilnya; gedung-gedung, orang-orang, burung-burung, pohon-pohon,
+jalanan semua ditambah biar rame" — graphics stay HD, no 120 FPS claim.
 
-## What this build contains
+## Density targets (seeded, deterministic, `?seed=8`)
 
-- **Sharpness:** pixelRatio capped at 2, ACES filmic tone mapping, exposure
-  1.12, ground texture 4096², facade textures 1024² with per-building UV
-  repeat and anisotropy 16, road markings as separate InstancedMesh geometry
-  (centre dashes, edge lines, zebra at every intersection), fog 220–1100.
-- **Sunset atmosphere:** golden-hour sky keys (16:00 pale blue, 17:30 gold,
-  18:30 orange, 19:20 pink dusk, 20:00 night), sun colour lerping to orange
-  `0xff8f3d`, additive sun-glow sprite, 9 drifting clouds, hemisphere fill
-  raised (day 1.15, night 0.35), night stars + moon.
-- **Livelier world:** 3 facade variants with warmer dark windows, sidewalk
-  strips + crosswalks in the ground texture, ~22 glowing shop signs, 8 neon
-  signs (FLAMINGO FM pink, VICE HOTEL cyan, TACOS 24H yellow) with additive
-  halos, merged-geometry palms in coast/plaza/avenue rows plus a second row,
-  24 shade trees, traffic lights at 4 intersections, 22 circling birds.
-- **Cars:** roof panel, slanted windshield, mirrors, bumpers, sport-only
-  spoiler, hubcap discs. Veloz Comet RS paint: hot pink `0xff2e7e`.
-- **Police:** split red/blue light bars, round-robin callsigns
-  (IBIS-43, TARPON-10, HERON-17, KESTREL-31, MARLIN-26, OSPREY-08, …),
-  roles RAMMING/PURSUIT/PATROL, helicopter at wanted ≥ 3 with searchlight.
-- **HUD:** top-left mission panel (chapter, timer, objective, stage, next),
-  vitals below it, top-right day/stars/cash/clock, PCPD response list,
-  circular 200×200 minimap + district name + respect bar, portrait dialogue,
-  radio CELESTE 98.1 with rotating tracks, big speedometer + car condition.
-- **Density:** 36 traffic, ~150 pedestrians, 24 parked, 22 birds, 3–4
-  buildings per block, 2 Spires + 4 Plaza towers, east + south ring roads,
-  beach promenade, lighthouse, jetskis, bus + taco truck.
+- Traffic cars: 36 on the road graph (was ~14), plus 24 parked cars.
+- Pedestrians: ~150 on sidewalks, varied colours/clothes, flee on gunfire.
+- Birds: 22 circling above Marina Bay and the plaza.
+- Buildings: ~120 across 6 districts, 3 height styles, emissive windows.
+- Trees: palm rows along Malecón Celeste + shade trees in parks (~200).
+- Streets: full grid + beach curve + ring roads, zebra crossings, traffic
+  lights, signs, benches, street lamps (lit at night), neon shop signs.
 
-## Reference frames (HUD text mirrored, names re-themed)
+## Performance budget (keeps it smooth, no FPS claim)
 
-- Mission panel: "GOLDEN HOUR · Lupe", timer 1:47, "Lose the manhunt before
-  Marco's boat sails", "STAGE 4/5", "NEXT: Reach the boat at the pier".
-- PCPD list: callsign + distance + tactic (RAMMING / PURSUIT / ROADBLOCK).
-- Radio: CELESTE 98.1, "Malecón Mirage · Vela Roja". Car: VELOZ COMET RS.
+- InstancedMesh for buildings, palms and lamps (few draw calls).
+- One directional light, 1024 shadow map, pixelRatio capped at 1.
+- Spawn/despawn traffic + pedestrians within ~150 m of the player.
+- MeshLambertMaterial, canvas textures drawn once at load, zero image files.
 
-## Verification
+## Screenshots (cover = chase)
 
-`node --check` on every src file, 7 screenshot scenes at seed 8
-(1280×720, ≤256 KiB, 0 console/page errors), `tools/playtest.mjs`
-desktop + touch, dossier via `MAKEFUN_OUTPUT_DIR=out node main.ts`.
-No FPS claim is made — SwiftShader in this VM runs ~1 fps and is not
-representative of real Chrome.
+1-chase (downtown, dusk, 3 stars, 2 police cars), 2-drive (golden hour,
+beach road), 3-street (Old Solara market, on foot, mission 2 Meet Marco),
+4-night (Marina neon), 5-touch (touch controls), 6-road-zoom (ring road),
+7-phone (phone dialog, bottom-right, clear of the vitals HUD top-left).

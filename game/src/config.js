@@ -1,77 +1,51 @@
-// SOLARA BAY — tuning constants + shared mutable game state (G).
-// Every module imports G from here, so there are no circular imports.
-// NOTE: the mission state object is G.msn — never name anything G.mission.
-export const CFG = {
-  world: 640, half: 320,
-  roads: [-240, -120, 0, 120, 240],
-  ringE: 312, ringS: 312, prom: -258,
-  roadW: 12,
-  trafficN: 36, pedN: 72, crowdN: 78, parkedN: 24, birdN: 22,
-  palmRows: 2, shadeTrees: 24,
-  walkSpeed: 5, runSpeed: 9, jumpV: 7,
-  carAccel: 22, carBrake: 34, carMax: 46, carReverse: 12,
-  sportMax: 58, truckMax: 34, vanMax: 38, taxiMax: 44,
-  wantedDecaySeen: 10, wantedClearHidden: 20,
-  sprayCost: 100, sprayPos: [132, 60],
-  garagePos: [120, -120], garageName: "Mara's Garage",
-  meetPos: [-240, 90], marcoPos: [-240, 87],
-  spawnPos: [-240, 80], velozPos: [-240, 66],
-  pierPos: [-292, 60], boatPos: [-296, 140],
-  lighthousePos: [-292, 200], ferrisPos: [-285, 120],
-  docksPos: [240, 180], raceStart: [0, 240],
-  beachPos: [-258, 200],
-  coinsN: 30, photoSpots: [[-258, 20], [0, 0], [-285, 120], [120, 120]],
-  radio: 'CELESTE 98.1',
-  tracks: ['Malecón Mirage · Vela Roja', 'Midnight Marina · Vela',
-    'Sunset Strip · The Palms', 'Neon Drive · Coral Skies'],
-  prices: { spray: 100, gun: 800, smg: 1800, armor: 250 },
+// SOLARA BAY tuning: speeds, prices, wanted rules, clock, districts, cars.
+export const CONFIG = {
+  worldSize: 640,
+  halfWorld: 320,
+  walkSpeed: 6,
+  runSpeed: 10.5,
+  jumpSpeed: 7.5,
+  gravity: 20,
+  carEnterRange: 4,
+  stealHeat: 1,
+  resprayPerStar: 100,
+  hideSeconds: 10,
+  clearSeconds: 20,
+  dayLengthSec: 480,
+  startHour: 8,
+  sunCoins: 30,
+  garageSlots: 3,
+  trafficCount: 36,
+  parkedCount: 24,
+  pedCount: 150,
+  birdCount: 22,
+  buildingCount: 120,
+  treeCount: 200,
 };
-export const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-export const lerp = (a, b, t) => a + (b - a) * t;
-export const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
-export const angLerp = (a, b, t) => {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+
+export const DISTRICTS = [
+  { name: 'Marina Bay', x: -260, z: 0, style: 'beach' },
+  { name: 'Old Solara', x: -120, z: -120, style: 'market' },
+  { name: 'The Spires', x: 80, z: -80, style: 'tower' },
+  { name: 'The Docks', x: 200, z: 160, style: 'dock' },
+  { name: 'Vista Hills', x: 160, z: -220, style: 'villa' },
+  { name: 'Calle Verde', x: -40, z: 200, style: 'residential' },
+];
+
+// 6 procedural car models: top speed (m/s), acceleration, turn rate.
+export const CAR_TYPES = {
+  sedan: { name: 'Cometa', topSpeed: 34, accel: 14, turn: 1.9, color: 0x3f7fd0 },
+  hatch: { name: 'Pip', topSpeed: 30, accel: 13, turn: 2.2, color: 0xe2543e },
+  taxi: { name: 'Cabro', topSpeed: 32, accel: 13, turn: 2.0, color: 0xffd23f },
+  van: { name: 'Mula', topSpeed: 26, accel: 10, turn: 1.5, color: 0x9aa5b1 },
+  sport: { name: 'Veloce GT', topSpeed: 46, accel: 20, turn: 2.4, color: 0xd81e5b },
+  truck: { name: 'Hauler', topSpeed: 24, accel: 9, turn: 1.3, color: 0x4a6b4f },
 };
-export const fmtCash = (n) => '$' + Math.floor(n).toLocaleString('en-US');
-export const fmtTime = (s) => {
-  s = Math.max(0, Math.ceil(s));
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
+export const WEAPONS = {
+  fists: { name: 'Fists', damage: 12, range: 2.2, rate: 0.45, ammo: Infinity },
+  pistol: { name: 'Vesper Pistol', damage: 34, range: 42, rate: 0.28, ammo: 12, mag: 12 },
 };
-// Shared mutable state. Fields are attached by modules as the game boots.
-export const G = {
-  phase: 'title', // title | play | pause | over
-  seed: 8, shotMode: false, shotScene: '',
-  timeOfDay: 17.5, day: 1, nightF: 0,
-  cash: 10350, wanted: 0, heat: 0, hiddenT: 0,
-  health: 100, armor: 0, weapon: 0,
-  ammo: [Infinity, 72, 150, 6], mag: [Infinity, 12, 30, 1],
-  msn: { idx: 0, stage: 0, timer: 0, objective: '', next: '', active: false },
-  stats: { missionsDone: 0, carsStolen: 0, photos: 0, fish: 0, taxiDone: 0,
-    raceWins: 0, coins: 0, maxWanted: 0, playTime: 0, jumps: 0 },
-  act: { taxi: null, race: null, fishing: 0, photoCd: 0 },
-  player: null, cars: [], traffic: [], peds: [], police: [], guards: [],
-  coins: [], colliders: [], neonHalos: [], trafficLights: [], birds: [],
-  policeUnits: [], heli: null, _policeSeq: 0,
-  camYaw: 0, camDist: 9, camPitch: 0.32,
-  dialogUntil: 0, toastUntil: 0, overKind: '',
-  touch: { active: false, moveX: 0, moveY: 0, camDX: 0 },
-  muted: false, elapsed: 0, frame: 0,
-  scene: null, renderer: null, camera: null,
-  sun: null, hemi: null, skyMat: null, sunGlow: null, stars: null, moon: null,
-  bursts: [], interact: null, nearCar: null, nearNpc: null,
-};
-export function resetRun() {
-  G.phase = 'play'; G.timeOfDay = 17.5; G.day = 1;
-  G.cash = 10350; G.wanted = 0; G.heat = 0; G.hiddenT = 0;
-  G.health = 100; G.armor = 0; G.weapon = 0;
-  G.ammo = [Infinity, 72, 150, 6]; G.mag = [Infinity, 12, 30, 1];
-  G.msn = { idx: 0, stage: 0, timer: 0, objective: '', next: '', active: true };
-  G.stats = { missionsDone: 0, carsStolen: 0, photos: 0, fish: 0, taxiDone: 0,
-    raceWins: 0, coins: 0, maxWanted: 0, playTime: 0, jumps: 0 };
-  G.act = { taxi: null, race: null, fishing: 0, photoCd: 0 };
-  G.police = []; G.guards = []; G.policeUnits = [];
-  G.dialogUntil = 0; G.overKind = ''; G.elapsed = 0;
-}
+
+export const PRICES = { resprayPerStar: 100, pistol: 250, armor: 150, ammo: 40 };
+export const SAVE_KEY = 'solara-bay-save-v1';

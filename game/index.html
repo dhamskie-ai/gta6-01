@@ -1,194 +1,63 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>SOLARA BAY — Make GTA 6</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e18; font-family: Arial, Helvetica, sans-serif; color: #fff; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1a2b; font-family: system-ui, Arial, sans-serif; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  #vitals { position: absolute; top: 12px; left: 12px; width: 220px; }
+  .bar { height: 12px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.5); margin: 3px 0; }
+  .bar > div { height: 100%; }
+  #healthFill { background: #37d67a; width: 100%; }
+  #armorFill { background: #4aa8ff; width: 0%; }
+  #stars { font-size: 26px; letter-spacing: 2px; color: #ffd23f; }
+  #cash { font-size: 22px; font-weight: 700; }
+  #clock { font-size: 15px; opacity: .9; }
+  #objective { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55); padding: 8px 14px; border-radius: 6px; max-width: 46vw; text-align: center; font-size: 15px; }
+  #speed { position: absolute; right: 16px; bottom: 16px; font-size: 30px; font-weight: 800; text-align: right; }
+  #weapon { font-size: 15px; font-weight: 400; }
+  #prompt { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); background: rgba(0,0,0,.65); padding: 8px 14px; border-radius: 6px; font-size: 16px; display: none; }
+  #minimap { position: absolute; left: 12px; bottom: 12px; border: 2px solid rgba(255,255,255,.6); border-radius: 50%; background: rgba(10,20,30,.8); }
+  #dialog { position: absolute; right: 14px; bottom: 120px; width: 300px; background: rgba(8,14,24,.88); border: 1px solid #3fd2c0; border-radius: 10px; padding: 10px 12px; display: none; font-size: 14px; line-height: 1.45; }
+  #dialog .who { color: #3fd2c0; font-weight: 700; }
+  #radio { position: absolute; right: 16px; top: 12px; background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 6px; font-size: 13px; color: #ff8fd0; }
+  .menu { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(6,20,40,.82), rgba(20,8,40,.82)); color: #fff; text-align: center; z-index: 10; }
+  .menu h1 { font-size: 64px; margin: 0; letter-spacing: 4px; color: #ffd23f; text-shadow: 0 4px 0 #e2543e, 0 8px 24px rgba(0,0,0,.6); }
+  .menu h2 { font-size: 18px; font-weight: 400; color: #9fe8ff; margin: 8px 0 24px; }
+  .menu button { pointer-events: auto; font-size: 18px; padding: 12px 28px; margin: 6px; border: none; border-radius: 8px; background: #ffd23f; color: #222; font-weight: 700; cursor: pointer; }
+  .menu button.alt { background: #3fd2c0; }
+  .menu p { max-width: 560px; line-height: 1.5; opacity: .9; }
   .hidden { display: none !important; }
-  .panel { background: rgba(8, 12, 24, 0.72); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 8px; backdrop-filter: blur(3px); }
-  /* Mission panel — top-left */
-  #missionPanel { position: fixed; top: 12px; left: 12px; width: 320px; padding: 10px 12px; border-left: 4px solid #ff2e7e; z-index: 10; }
-  #mpChapter { color: #ffd23e; font-weight: bold; font-size: 15px; letter-spacing: 1px; }
-  #mpTimer { float: right; color: #ff5a5a; font-weight: bold; font-size: 18px; }
-  #mpObjective { font-size: 14px; margin: 5px 0 3px; line-height: 1.3; }
-  #mpStage { color: #2aff5a; font-size: 12px; font-weight: bold; }
-  #mpNext { color: #9fb4d8; font-size: 12px; }
-  /* Vitals below mission panel */
-  #vitals { position: fixed; top: 128px; left: 12px; width: 320px; padding: 8px 12px; z-index: 10; font-size: 12px; }
-  .bar { height: 10px; background: rgba(255,255,255,0.15); border-radius: 5px; overflow: hidden; margin: 3px 0; }
-  #hpBar { height: 100%; background: #2aff5a; width: 100%; }
-  #armorBar { height: 100%; background: #4ae0ff; width: 0%; }
-  #weaponSlots { margin-top: 5px; }
-  .wslot { display: inline-block; padding: 2px 6px; margin-right: 4px; background: rgba(255,255,255,0.1); border-radius: 4px; color: #c8d4e8; }
-  .wslot.on { background: #ff2e7e; color: #fff; }
-  #jobsLine { margin-top: 5px; color: #9fb4d8; font-size: 11px; }
-  /* Top-right cluster */
-  #topRight { position: fixed; top: 12px; right: 12px; text-align: right; padding: 10px 12px; z-index: 10; }
-  #dayLine { font-size: 12px; color: #9fb4d8; letter-spacing: 1px; }
-  #stars { font-size: 22px; letter-spacing: 2px; }
-  #cash { font-size: 22px; font-weight: bold; color: #2aff5a; }
-  #clock { font-size: 13px; color: #dfe8f8; }
-  #wantedState { font-size: 12px; color: #ff5a5a; font-weight: bold; }
-  /* PCPD list */
-  #pcpdList { position: fixed; top: 128px; right: 12px; width: 250px; padding: 8px 10px; z-index: 10; font-size: 12px; }
-  .pcpd-h { color: #ff5a5a; font-weight: bold; margin-bottom: 4px; }
-  .pcpd-r { padding: 2px 0; border-top: 1px solid rgba(255,255,255,0.08); }
-  .ram { color: #ff5a5a; font-weight: bold; } .pur { color: #ffd23e; } .pat { color: #4ae0ff; }
-  /* Minimap — bottom-left, circular */
-  #mapWrap { position: fixed; left: 12px; bottom: 12px; z-index: 10; text-align: center; }
-  #minimap { width: 200px; height: 200px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); background: rgba(10,14,24,0.85); }
-  #districtName { font-weight: bold; font-size: 13px; letter-spacing: 1px; margin-top: 4px; text-shadow: 0 1px 3px #000; }
-  #respectBar { height: 6px; background: rgba(255,255,255,0.15); border-radius: 3px; overflow: hidden; width: 200px; margin: 3px auto 0; }
-  #respectBar div, #respectBar { background: #ffd23e; }
-  #respectBar { background: rgba(255,255,255,0.15); }
-  #respectLabel { font-size: 11px; color: #ffd23e; }
-  /* Dialogue — bottom-centre */
-  #dialog { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: 560px; max-width: 92vw; padding: 10px 12px; z-index: 11; display: flex; gap: 10px; align-items: center; }
-  #dlgPortrait { width: 56px; height: 56px; min-width: 56px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
-  #dlgName { color: #ffd23e; font-size: 12px; font-weight: bold; letter-spacing: 1px; }
-  #dlgText { font-size: 14px; line-height: 1.35; margin-top: 2px; }
-  /* Radio + speed — bottom-right */
-  #speedWrap { position: fixed; right: 12px; bottom: 12px; text-align: right; z-index: 10; padding: 10px 12px; }
-  #radioStation { font-size: 12px; color: #ff9ecf; font-weight: bold; }
-  #radioTrack { font-size: 12px; color: #dfe8f8; }
-  #carName { font-size: 12px; color: #9fb4d8; letter-spacing: 1px; margin-top: 4px; }
-  #speedNum { font-size: 44px; font-weight: bold; line-height: 1; }
-  #speedUnit { font-size: 12px; color: #9fb4d8; }
-  #condWrap { margin-top: 4px; }
-  #condBar { height: 6px; background: #2aff5a; width: 100%; border-radius: 3px; }
-  /* Prompt + toast */
-  #prompt { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); padding: 8px 16px; z-index: 11; font-size: 15px; font-weight: bold; }
-  #toast { position: fixed; left: 50%; top: 46%; transform: translateX(-50%); padding: 10px 18px; z-index: 12; font-size: 16px; font-weight: bold; color: #ffd23e; }
-  #hint { position: fixed; left: 50%; bottom: 130px; transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,0.65); text-shadow: 0 1px 3px #000; z-index: 9; }
-  #muteBtn { position: fixed; right: 12px; top: 200px; z-index: 13; background: rgba(8,12,24,0.72); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 16px; }
-  /* Menus */
-  .screen { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(160deg, rgba(20,10,40,0.82), rgba(10,20,50,0.82)); text-align: center; }
-  .screen h1 { font-size: 64px; letter-spacing: 6px; color: #ff2e7e; text-shadow: 0 0 24px rgba(255,46,126,0.6); }
-  .screen h2 { font-size: 18px; color: #ffd23e; letter-spacing: 3px; margin: 6px 0 22px; }
-  .screen p { color: #dfe8f8; max-width: 520px; line-height: 1.5; margin-bottom: 18px; }
-  .btn { display: inline-block; padding: 12px 28px; margin: 6px; font-size: 17px; font-weight: bold; color: #fff; background: #ff2e7e; border: none; border-radius: 8px; cursor: pointer; }
-  .btn.alt { background: rgba(255,255,255,0.15); }
-  .btn:hover { filter: brightness(1.15); }
-  .keys { font-size: 13px; color: #9fb4d8; line-height: 1.7; }
-  /* Touch controls */
-  #touchUI { position: fixed; inset: 0; z-index: 15; pointer-events: none; }
-  #joy { position: absolute; left: 18px; bottom: 230px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.3); pointer-events: auto; }
-  #joyKnob { position: absolute; left: 38px; top: 38px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.45); }
-  .tbtn { position: absolute; pointer-events: auto; width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); background: rgba(8,12,24,0.6); color: #fff; font-weight: bold; font-size: 13px; }
-  #btnAct { right: 20px; bottom: 240px; background: rgba(255,46,126,0.75); }
-  #btnBrake { right: 108px; bottom: 160px; }
-  #btnCam { right: 20px; bottom: 150px; }
-  #btnFire { right: 108px; bottom: 250px; }
-  @media (max-width: 500px) {
-    #missionPanel { width: 200px; padding: 6px 8px; top: 8px; left: 8px; }
-    #mpChapter { font-size: 12px; } #mpObjective { font-size: 12px; }
-    #vitals { width: 200px; top: 108px; left: 8px; padding: 6px 8px; }
-    #topRight { top: 8px; right: 8px; padding: 6px 8px; }
-    #cash { font-size: 16px; } #stars { font-size: 16px; }
-    #pcpdList { display: none; }
-    #minimap { width: 120px; height: 120px; }
-    #respectBar { width: 120px; }
-    #mapWrap { left: 8px; bottom: 8px; }
-    #dialog { top: 235px; bottom: auto; width: 94vw; }
-    #dlgPortrait { width: 40px; height: 40px; min-width: 40px; font-size: 16px; }
-    #speedWrap { bottom: 8px; right: 8px; padding: 6px 8px; }
-    #speedNum { font-size: 30px; }
-    #muteBtn { top: auto; bottom: 120px; right: 8px; }
-    #prompt { bottom: auto; top: 380px; font-size: 13px; }
-    #hint { display: none; }
-    #joy { bottom: 210px; }
-    .screen h1 { font-size: 40px; }
-  }
+  #touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; display: none; }
+  #stick { position: absolute; left: 26px; bottom: 190px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.4); pointer-events: auto; }
+  #stickKnob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  .tbtn { position: absolute; pointer-events: auto; width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.2); border: 2px solid rgba(255,255,255,.5); color: #fff; font-size: 15px; font-weight: 700; }
+  #btnE { right: 30px; bottom: 210px; } #btnJump { right: 110px; bottom: 130px; }
+  #btnFire { right: 30px; bottom: 110px; background: rgba(255,80,60,.4); } #btnBrake { right: 120px; bottom: 220px; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 </style>
-<script type="importmap">{"imports": {"three": "./vendor/three.module.min.js"}}</script>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 </head>
 <body>
-<canvas id="game"></canvas>
-
-<div id="missionPanel" class="panel">
-  <span id="mpChapter">CH 1 · FIRST GEAR</span><span id="mpTimer" class="hidden"></span>
-  <div id="mpObjective">Steal the Veloz Comet RS</div>
-  <div id="mpStage">STAGE 1/2</div>
-  <div id="mpNext">NEXT: Drive it to Mara's garage</div>
+<canvas id="game" aria-label="SOLARA BAY: open-world crime game in a sunny coastal city"></canvas>
+<div id="hud">
+  <div id="vitals"><div id="stars">☆☆☆☆☆</div><div class="bar"><div id="healthFill"></div></div><div class="bar"><div id="armorFill"></div></div><div id="cash">$0</div><div id="clock">08:00 · CELESTE 98.1</div></div>
+  <div id="objective">SOLARA BAY</div>
+  <div id="radio">♪ CELESTE 98.1 — Malecón Mirage</div>
+  <canvas id="minimap" width="180" height="180"></canvas>
+  <div id="dialog"><span class="who"></span><div class="text"></div></div>
+  <div id="prompt"></div>
+  <div id="speed"><span id="speedNum">0</span> km/h<div id="weapon">Fists</div></div>
 </div>
-<div id="vitals" class="panel">
-  <div><span id="hpText">HP 100</span></div>
-  <div class="bar"><div id="hpBar"></div></div>
-  <div class="bar"><div id="armorBar"></div></div>
-  <div id="weaponSlots"></div>
-  <div id="ammoText">FISTS</div>
-  <div id="jobsLine"></div>
-</div>
-<div id="topRight" class="panel">
-  <div id="dayLine">DAY 1</div>
-  <div id="stars">☆☆☆☆☆</div>
-  <div id="cash">$10,350</div>
-  <div id="clock">17:30 · SIANG</div>
-  <div id="wantedState"></div>
-</div>
-<div id="pcpdList" class="panel hidden"><div id="pcpdTitle">PCPD RESPONSE · 0 UNITS</div></div>
-<div id="mapWrap">
-  <canvas id="minimap" width="200" height="200"></canvas>
-  <div id="districtName">MALECÓN CELESTE</div>
-  <div id="respectBar"><div style="width:20%"></div></div>
-  <div id="respectLabel">RESPECT 1 · ROOKIE</div>
-</div>
-<div id="dialog" class="panel hidden">
-  <div id="dlgPortrait">SV</div>
-  <div><div id="dlgName">SAL VEGA · FIXER</div><div id="dlgText"></div></div>
-</div>
-<div id="speedWrap" class="panel">
-  <div id="radioStation">♪ CELESTE 98.1 · Neon Drive</div>
-  <div id="radioTrack">Malecón Mirage · Vela Roja</div>
-  <div id="carName">ON FOOT</div>
-  <div><span id="speedNum">0</span> <span id="speedUnit">KM/H</span></div>
-  <div id="condWrap" class="hidden"><div class="bar"><div id="condBar"></div></div></div>
-</div>
-<div id="prompt" class="panel hidden"></div>
-<div id="toast" class="panel hidden"></div>
-<div id="hint">WASD move · E enter car / talk · Click shoot · R reload · Esc pause</div>
-<button id="muteBtn">🔊</button>
-
-<div id="touchUI" class="hidden">
-  <div id="joy"><div id="joyKnob"></div></div>
-  <button class="tbtn" id="btnAct">MASUK</button>
-  <button class="tbtn" id="btnBrake">REM</button>
-  <button class="tbtn" id="btnCam">KAM</button>
-  <button class="tbtn" id="btnFire">TEMBAK</button>
-</div>
-
-<div id="titleScreen" class="screen">
-  <h1>SOLARA BAY</h1>
-  <h2>MAKE GTA 6 · MALECÓN CELESTE</h2>
-  <p>You are Nico, a getaway driver back home and in debt to fixer Sal Vega.
-  Steal cars, outrun the PCPD, and work eight jobs from the Malecón to the
-  Golden Hour boat — before Dario Kane buys the whole Marina.</p>
-  <div>
-    <button class="btn" id="btnNew">NEW GAME</button>
-    <button class="btn alt hidden" id="btnContinue">CONTINUE</button>
-  </div>
-  <div class="keys">WASD move / drive · Mouse look · Shift run / handbrake · Space jump<br>
-  E enter car / steal / talk · Click punch / shoot · 1–4 weapons · R reload · C camera · M mute · Esc pause</div>
-</div>
-<div id="pauseScreen" class="screen hidden">
-  <h1>PAUSED</h1>
-  <h2>SOLARA BAY</h2>
-  <div>
-    <button class="btn" id="btnResume">RESUME</button>
-    <button class="btn alt" id="btnRestart">RESTART MISSION</button>
-    <button class="btn alt" id="btnSaveQuit">SAVE &amp; QUIT</button>
-  </div>
-</div>
-<div id="overScreen" class="screen hidden">
-  <h1 id="overTitle">K.O.</h1>
-  <h2 id="overText">Nico is down.</h2>
-  <div><button class="btn" id="btnRetry">RETRY</button></div>
-</div>
-
+<div id="touch"><div id="stick"><div id="stickKnob"></div></div><button class="tbtn" id="btnE">E</button><button class="tbtn" id="btnJump">JUMP</button><button class="tbtn" id="btnFire">FIRE</button><button class="tbtn" id="btnBrake">BRK</button></div>
+<div id="title" class="menu"><h1>SOLARA BAY</h1><h2>A sunny coastal city. One debt. Five jobs. — Make GTA 6</h2><p>Ro Mendez is back in Solara Bay, in debt to fixer Sal Vega. Walk the crowded sidewalks, steal a car, outrun the police, and work the debt off.</p><button id="btnNew">NEW GAME</button><button id="btnContinue" class="alt">CONTINUE</button><p>WASD move/drive · Mouse look · E steal car · Click punch/shoot · Shift run/handbrake · Space jump · R reload · C camera · M mute · Esc pause</p></div>
+<div id="pause" class="menu hidden"><h1>PAUSED</h1><button id="btnResume">RESUME</button><button id="btnRestart" class="alt">RESTART MISSION</button><button id="btnSave" class="alt">SAVE GAME</button><button id="btnQuit">SAVE &amp; QUIT TO TITLE</button></div>
+<div id="over" class="menu hidden"><h1 id="overTitle">K.O.</h1><p id="overText"></p><button id="btnRetry">RETRY MISSION</button><button id="btnOverTitle" class="alt">TITLE SCREEN</button></div>
+<div id="missionEnd" class="menu hidden"><h1 id="endTitle">MISSION PASSED</h1><p id="endText"></p><button id="btnNext">CONTINUE</button></div>
+<p id="status" role="status" aria-live="polite"></p>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

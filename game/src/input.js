@@ -1,46 +1,32 @@
-// Keyboard + mouse input with edge detection (wasPressed) and pointer lock.
-export class Input {
-  constructor() {
-    this.keys = new Set(); this.pressed = new Set();
-    this.mouseDX = 0; this.mouseDY = 0; this.mouseDown = false;
-    this.mousePressed = false; this.wheel = 0; this.locked = false;
-  }
-  attach(el) {
-    addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code); this.pressed.add(e.code);
-      if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
-    });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
-    el.addEventListener('mousedown', (e) => {
-      this.mouseDown = true; this.mousePressed = true;
-      if (e.button === 0 && document.pointerLockElement !== el) {
-        try { el.requestPointerLock(); } catch { /* headless */ }
-      }
-    });
-    addEventListener('mouseup', () => { this.mouseDown = false; });
-    document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === el;
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (this.locked) { this.mouseDX += e.movementX; this.mouseDY += e.movementY; }
-    });
-    el.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); }, { passive: true });
-    el.addEventListener('contextmenu', (e) => e.preventDefault());
-  }
-  down(code) { return this.keys.has(code); }
-  wasPressed(code) { return this.pressed.has(code); }
-  axis() {
-    let x = 0, y = 0;
-    if (this.down('KeyW') || this.down('ArrowUp')) y += 1;
-    if (this.down('KeyS') || this.down('ArrowDown')) y -= 1;
-    if (this.down('KeyA') || this.down('ArrowLeft')) x -= 1;
-    if (this.down('KeyD') || this.down('ArrowRight')) x += 1;
-    return { x, y };
-  }
-  endFrame() {
-    this.pressed.clear(); this.mouseDX = 0; this.mouseDY = 0;
-    this.mousePressed = false; this.wheel = 0;
-  }
+// Keyboard + mouse + touch input, with edge detection (wasPressed).
+export function createInput(canvas) {
+  const input = {
+    keys: new Set(), pressed: new Set(), mouseDX: 0, mouseDY: 0,
+    lookYaw: 0, lookPitch: 0, locked: false, firing: false,
+    touchVec: { x: 0, y: 0 }, touch: { e: false, jump: false, fire: false, brake: false },
+    down(code) { return this.keys.has(code); },
+    wasPressed(code) { return this.pressed.has(code); },
+    endFrame() { this.pressed.clear(); this.mouseDX = 0; this.mouseDY = 0; this.touch.e = false; this.touch.jump = false; this.touch.fire = false; },
+  };
+  addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    input.keys.add(e.code); input.pressed.add(e.code);
+    if (e.code === 'Space') e.preventDefault();
+  });
+  addEventListener('keyup', (e) => input.keys.delete(e.code));
+  addEventListener('blur', () => input.keys.clear());
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) input.firing = true;
+    if (!input.locked && document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+  });
+  addEventListener('mouseup', (e) => { if (e.button === 0) input.firing = false; });
+  document.addEventListener('pointerlockchange', () => { input.locked = document.pointerLockElement === canvas; });
+  addEventListener('mousemove', (e) => {
+    if (!input.locked) return;
+    input.mouseDX += e.movementX; input.mouseDY += e.movementY;
+    input.lookYaw -= e.movementX * 0.0028;
+    input.lookPitch = Math.max(-0.9, Math.min(0.6, input.lookPitch - e.movementY * 0.0028));
+  });
+  addEventListener('contextmenu', (e) => { if (e.target === canvas) e.preventDefault(); });
+  return input;
 }
