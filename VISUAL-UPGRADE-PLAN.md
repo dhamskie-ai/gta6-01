@@ -1,114 +1,49 @@
-# SOLARA BAY — Visual Upgrade Plan (round 7, implemented)
+# SOLARA BAY — Visual Upgrade Plan (applied in this build)
 
-**Status:** IMPLEMENTED in the round-7 rebuild — this file is the plan the
-builder worked from, alongside DESIGN.md and the reference frames.
+Target look: the reference frame Dham sent — a neon-soaked sunset chase:
+pink sports car, police cars + helicopter, palm-lined boulevard, glowing
+billboards, rich HUD (mission panel, police response list, circular minimap,
+radio readout, big speedometer, character-portrait dialogue).
 
-**Goal:** more detail, a livelier world, a sharper image — look like the
-reference frame: a neon-soaked sunset chase (pink sports car, police cars
-+ helicopter, palm-lined boulevard, glowing billboards, rich HUD with
-mission panel, police response list, circular minimap, radio readout,
-big speedometer, character-portrait dialogue).
+## What this build contains
 
-## Reference frame inventory (what "good" looks like)
+- **Sharpness:** pixelRatio capped at 2, ACES filmic tone mapping, exposure
+  1.12, ground texture 4096², facade textures 1024² with per-building UV
+  repeat and anisotropy 16, road markings as separate InstancedMesh geometry
+  (centre dashes, edge lines, zebra at every intersection), fog 220–1100.
+- **Sunset atmosphere:** golden-hour sky keys (16:00 pale blue, 17:30 gold,
+  18:30 orange, 19:20 pink dusk, 20:00 night), sun colour lerping to orange
+  `0xff8f3d`, additive sun-glow sprite, 9 drifting clouds, hemisphere fill
+  raised (day 1.15, night 0.35), night stars + moon.
+- **Livelier world:** 3 facade variants with warmer dark windows, sidewalk
+  strips + crosswalks in the ground texture, ~22 glowing shop signs, 8 neon
+  signs (FLAMINGO FM pink, VICE HOTEL cyan, TACOS 24H yellow) with additive
+  halos, merged-geometry palms in coast/plaza/avenue rows plus a second row,
+  24 shade trees, traffic lights at 4 intersections, 22 circling birds.
+- **Cars:** roof panel, slanted windshield, mirrors, bumpers, sport-only
+  spoiler, hubcap discs. Veloz Comet RS paint: hot pink `0xff2e7e`.
+- **Police:** split red/blue light bars, round-robin callsigns
+  (IBIS-43, TARPON-10, HERON-17, KESTREL-31, MARLIN-26, OSPREY-08, …),
+  roles RAMMING/PURSUIT/PATROL, helicopter at wanted ≥ 3 with searchlight.
+- **HUD:** top-left mission panel (chapter, timer, objective, stage, next),
+  vitals below it, top-right day/stars/cash/clock, PCPD response list,
+  circular 200×200 minimap + district name + respect bar, portrait dialogue,
+  radio CELESTE 98.1 with rotating tracks, big speedometer + car condition.
+- **Density:** 36 traffic, ~150 pedestrians, 24 parked, 22 birds, 3–4
+  buildings per block, 2 Spires + 4 Plaza towers, east + south ring roads,
+  beach promenade, lighthouse, jetskis, bus + taco truck.
 
-- Warm pink/orange sunset sky, sun low, long soft shadows.
-- Palm trees lining both sides of the boulevard, fronds visibly drooping.
-- Big glowing signs (pink "FLAMINGO FM"-style billboard, cyan "HOTEL").
-- Pink player sports car, black-and-white police cars with flashing
-  red/blue light bars, helicopter overhead.
-- HUD: top-left mission panel (chapter, timer, objective, stage);
-  top-right money + wanted stars + day/time; police unit list under it;
-  circular minimap bottom-left with district name + respect bar;
-  dialogue with character portrait bottom-centre; radio + big speed
-  bottom-right.
+## Reference frames (HUD text mirrored, names re-themed)
 
-Reference frame 2 (the binding target): mission panel "GOLDEN HOUR · Lupe",
-timer 1:47, "Lose the manhunt before Marco's boat sails", STAGE 4/5,
-"NEXT: Reach the boat at the pier"; PCPD list (PELICAN-11, GECKO-25,
-AIR-1, BARRACUDA-18, TAC-45, "+4 more units"); $86,250; minimap
-"Malecón Celeste" + RESPECT SHOT CALLER; dialogue Marco (SMUGGLER ·
-WHEELMAN); radio CELESTE 98.1 "Malecón Mirage · Vela Roja"; VELOZ COMET
-RS 113 km/h G3.
+- Mission panel: "GOLDEN HOUR · Lupe", timer 1:47, "Lose the manhunt before
+  Marco's boat sails", "STAGE 4/5", "NEXT: Reach the boat at the pier".
+- PCPD list: callsign + distance + tactic (RAMMING / PURSUIT / ROADBLOCK).
+- Radio: CELESTE 98.1, "Malecón Mirage · Vela Roja". Car: VELOZ COMET RS.
 
-## 1. render.js — sharpness + sunset atmosphere
+## Verification
 
-- Pixel ratio cap 2; ACES filmic, exposure 1.05.
-- Sky keys: gold→orange→pink ramp (16:00 pale blue, 17:30 gold,
-  18:30 orange, 19:20 pink dusk, 20:00 night). Fog follows the sky.
-- Sun colour lerps toward orange (0xff8f3d) at sunset with an intensity bump.
-- Sun glow: large additive radial sprite tracking the sun direction.
-- Clouds: 14 soft sprites drifting at y ≈ 110–170.
-- Hemisphere fill raised (day 1.6) so shadows stop being pitch black.
-- Day counter increments when timeOfDay wraps past 24.
-- Night block drives neon-halo opacities (0.12 + nightFactor × 0.5).
-
-## 2. city.js — a livelier, more detailed world
-
-- Window textures: 6 facade variants (1024²), lighter dark windows.
-- Ground texture 4096² with sidewalk strips + crosswalks at every
-  intersection; anisotropy = renderer maximum.
-- Storefronts: 22 glowing shop signs + awnings; 8 neon signs
-  (FLAMINGO FM, VICE HOTEL, TACOS 24H, MARLIN CEVICHE…) with halos.
-- Palms: one merged detailed geometry per palm (leaning 3-segment
-  trunk, 10 drooping fronds, 3 coconuts), single InstancedMesh; rows on
-  the coast, the plaza, and both avenues, plus a second staggered row.
-- Traffic lights at 4 intersections (green 4 s → amber 1 s → red 4 s).
-- Birds: 22, circling with flapping wings.
-- 24 shade trees, street props (hydrants, benches, bins, planters),
-  rooftop AC units, water towers, antennas, market stalls, beach
-  umbrellas/towels, lifeguard tower, bonfire, lighthouse with rotating
-  beam, pier, ferris wheel, 2 jetskis, 30 sun coins.
-
-## 3. vehicles.js — detailed cars
-
-- Body-colour roof panel, slanted glass windshield, side mirrors,
-  front + rear bumpers, grille, front plate, rear spoiler (sport only),
-  hubcaps. Sport paint hot pink 0xff2e7e (Veloz Comet RS).
-
-## 4. police.js — light bars, callsigns, helicopter
-
-- Light bar split red/blue, flashing in alternation.
-- Callsigns round-robin (IBIS-43, TARPON-10, HERON-17, KESTREL-31,
-  MARLIN-26, OSPREY-08, PELICAN-11, GECKO-25, BARRACUDA-18, TAC-45…);
-  role RAMMING when close, PURSUIT otherwise, ROADBLOCK at wanted ≥ 4.
-- Helicopter (body, stripe, glass, tail boom, rotors, beacon,
-  searchlight cone) visible at wanted ≥ 3, orbiting at radius 26,
-  height 14.
-
-## 5. hud.js + index.html — Vice City-style HUD
-
-- Mission panel top-left (chapter, timer, objective, stage, next).
-- Vitals below it; top-right DAY n + stars + cash + clock + IN SIGHT.
-- PCPD response list under the cluster (rebuilt every frame).
-- Minimap 200×200, clipped to a circle; district name + respect bar.
-- Dialogue: 56×56 portrait tile (initials on a hue gradient) +
-  name/role + body.
-- Radio CELESTE 98.1, track rotating every 25 s; big speedometer
-  (44 px) + car-condition bar; jobs counter (taxi/fish/photos/coins).
-
-## 6. config.js — density + paint
-
-- trafficN 36, pedN 72 (+crowds to ~150), parkedN 24, birdN 22.
-- Sport colour hot pink.
-
-## 7. main.js + missions.js — state the HUD reads
-
-- G.day starts at 1; stats.missionsDone increments on completion;
-  respect = missionsDone + 1 (capped 5).
-- 8 missions incl. Meet Marco (Marlin Ceviche, Malecón road) and
-  Golden Hour finale (107 s timer, 5 steps, wanted 4 at escape).
-
-## 8. shots.js — truthful mission panel per scene
-
-- chase → mission 8 (Golden Hour), step 4/5, timer 1:47, wanted 4.
-- street → mission 1 (First Gear), talk step, STAGE 2/3.
-- night → mission 5 (Neon Nights); drive → free roam.
-
-## HD rules (kept from rounds 6g/6i)
-
-- Ground 4096², facade 1024² + RepeatWrapping + aniso 16, fog
-  220–1100, pixelRatio cap 2, road markings as geometry (InstancedMesh).
-- Meet point Marlin Ceviche (-240, 90) on the Malecón road (never inside
-  a building footprint); Marco (-238, 64); spawn (-240, 80);
-  VELOZ (-240, 66). Camera yaw = heading (chase behind the car).
-- Headlight intensity 120; asphalt 0x3d434b.
+`node --check` on every src file, 7 screenshot scenes at seed 8
+(1280×720, ≤256 KiB, 0 console/page errors), `tools/playtest.mjs`
+desktop + touch, dossier via `MAKEFUN_OUTPUT_DIR=out node main.ts`.
+No FPS claim is made — SwiftShader in this VM runs ~1 fps and is not
+representative of real Chrome.

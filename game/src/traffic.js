@@ -1,281 +1,193 @@
-// Traffic AI + pedestrians + side activities (taxi, fishing spots are in
-// missions; stunt jumps, sun-coin pickup and the wandering street bonus
-// live here). ~150 pedestrians: 72 walkers + crowd groups.
+// Traffic AI (road-following cars + bus) and pedestrian AI (~150 people).
 import * as THREE from 'three';
-import { CFG, TRAFFIC_MIX, TRAFFIC_PAINTS } from './config.js';
-import { rr, ri, pick, clamp, dist2 } from './random.js';
-import { createCar, isCarObj } from './vehicles.js';
-import { collide } from './city.js';
-import { sfxHorn, sfxCoin } from './audio.js';
+import { G, CFG, clamp, dist2 } from './config.js';
+import { makeCar, isCarObj, syncCarMesh, CAR_TYPES } from './vehicles.js';
+import { collides, lightStateAt } from './city.js';
+import { RNG } from './random.js';
 
-const PED_SHIRTS = [0xc23a3a, 0x2a7a4a, 0x2a5a9a, 0xe8a23a, 0x7a4a9e, 0xdddddd, 0x222831, 0xe07a9e, 0x3a9a8a, 0xd86a2e];
-const PED_SKINS = [0xe8b88a, 0xc98a5a, 0x8a5a3a, 0xf2c89a];
-function pedMesh(rng) {
-  const g = new THREE.Group();
-  const shirt = new THREE.MeshLambertMaterial({ color: pick(rng, PED_SHIRTS) });
-  const skin = new THREE.MeshLambertMaterial({ color: pick(rng, PED_SKINS) });
-  const pants = new THREE.MeshLambertMaterial({ color: pick(rng, [0x2a3a5a, 0x333333, 0x5a4a3a]) });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirt);
-  body.position.y = 1.05; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), skin);
-  head.position.y = 1.65; g.add(head);
-  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.38),
-    new THREE.MeshLambertMaterial({ color: pick(rng, [0x1a1a1a, 0x5a3a1a, 0x8a8a8a, 0xc2a23a]) }));
-  hair.position.y = 1.86; g.add(hair);
-  if (rng() < 0.3) { // hat
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.3, 0.1, 8),
-      new THREE.MeshLambertMaterial({ color: pick(rng, [0xc23a3a, 0x2a5a9a, 0xe8a23a]) }));
-    hat.position.y = 1.9; g.add(hat);
-  }
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), pants);
-  legs.position.y = 0.35; g.add(legs);
-  const shoes = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.12, 0.4),
-    new THREE.MeshLambertMaterial({ color: 0x222222 }));
-  shoes.position.y = 0.06; g.add(shoes);
-  // jacket stripe + belt for the player-lookalike variety
-  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.08, 0.34),
-    new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-  belt.position.y = 0.68; g.add(belt);
-  g.userData = { body, head, legs };
-  return g;
+const MIX = ['sedan', 'sedan', 'hatch', 'taxi', 'van', 'sedan', 'hatch', 'sport', 'taxi', 'van', 'sedan', 'truck'];
+function nearRoad(v) {
+  return CFG.roads.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), CFG.roads[0]);
 }
-function nearestRoadLine(v) {
-  let best = CFG.grid[0], bd = 1e9;
-  for (const g of CFG.grid) { const d = Math.abs(v - g); if (d < bd) { bd = d; best = g; } }
-  return best;
+function randRoadPoint(rng) {
+  const road = rng.pick(CFG.roads);
+  if (rng.chance(0.5)) return { x: rng.range(-300, 300), z: road, horiz: true };
+  return { x: road, z: rng.range(-300, 300), horiz: false };
 }
-export function spawnWorld(G) {
-  const rng = G.rng;
-  G.traffic = []; G.peds = []; G.parked = [];
-  // --- traffic: 36 cars on the road graph ---
+export function initTraffic(rng) {
   for (let i = 0; i < CFG.trafficN; i++) {
-    const axis = rng() < 0.5 ? 'x' : 'z';
-    const line = pick(rng, CFG.grid);
-    const along = rr(rng, -290, 290);
-    const type = TRAFFIC_MIX[i % TRAFFIC_MIX.length];
-    const paint = TRAFFIC_PAINTS[i % TRAFFIC_PAINTS.length];
-    const x = axis === 'x' ? along : line;
-    const z = axis === 'x' ? line : along;
-    const dir = rng() < 0.5 ? 1 : -1;
-    const heading = axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
-    const car = createCar(G, type, x, z, heading, 'traffic', paint);
-    car.speed = rr(rng, 8, 14);
-    G.traffic.push({ car, axis, line, dir, cruise: car.speed, wait: 0 });
+    const p = randRoadPoint(rng);
+    const type = MIX[i % MIX.length];
+    const car = makeCar(type, p.x, p.z, p.horiz ? (rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2) : (rng.chance(0.5) ? 0 : Math.PI));
+    car.driver = 'traffic'; car.speed = rng.range(6, 12);
+    car.horiz = p.horiz; car.target = null;
+    G.traffic.push(car);
   }
-  // --- parked: 24 cars along road edges ---
-  for (let i = 0; i < CFG.parkedN; i++) {
-    const axis = rng() < 0.5 ? 'x' : 'z';
-    const line = pick(rng, CFG.grid);
-    const along = rr(rng, -280, 280);
-    const side = rng() < 0.5 ? -8.5 : 8.5;
-    const type = TRAFFIC_MIX[ri(rng, 0, TRAFFIC_MIX.length - 1)];
-    const paint = TRAFFIC_PAINTS[ri(rng, 0, TRAFFIC_PAINTS.length - 1)];
-    const x = axis === 'x' ? along : line + side;
-    const z = axis === 'x' ? line + side : along;
-    const heading = axis === 'x' ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : (side > 0 ? 0 : Math.PI);
-    const car = createCar(G, type, x, z, heading, 'parked', paint);
-    car.speed = 0;
-    G.parked.push(car);
-  }
-  // --- Solara Bus + taco truck (stealable) ---
-  const bus = createCar(G, 'bus', 120, -100, 0, 'parked');
-  bus.speed = 0; G.parked.push(bus); G.bus = bus;
-  const taco = createCar(G, 'taco', -120, 100, Math.PI, 'parked');
-  taco.speed = 0; G.parked.push(taco); G.tacoTruck = taco;
-  // --- the VELOZ Comet RS (mission car, hot pink sport) ---
-  const veloz = createCar(G, 'sport', CFG.velozPos.x, CFG.velozPos.z, Math.PI, 'parked', 0xff2e7e);
-  veloz.speed = 0; G.veloz = veloz; G.parked.push(veloz);
-  // --- pedestrians: 72 walkers + crowd groups to ~150 ---
-  for (let i = 0; i < CFG.pedN; i++) {
-    const axis = rng() < 0.5 ? 'x' : 'z';
-    const line = pick(rng, CFG.grid);
-    const along = rr(rng, -290, 290);
-    const off = rng() < 0.5 ? -9 : 9;
-    const mesh = pedMesh(rng);
-    const x = axis === 'x' ? along : line + off;
-    const z = axis === 'x' ? line + off : along;
-    mesh.position.set(x, 0, z);
-    G.fx.scene.add(mesh);
-    G.peds.push({ mesh, x, z, heading: rng() * Math.PI * 2, speed: rr(rng, 0.8, 1.6),
-      state: 'walk', pauseT: 0, jog: rng() < 0.12, flee: false, axis, line, off });
-  }
-  // crowd groups: market, beach, plaza, bus stop
-  const crowds = [[-60, 120, 18], [-258, 180, 14], [0, 0, 16], [120, -120, 12], [-120, -60, 12], [60, 180, 14], [-240, 40, 12]];
-  for (const [cx, cz, n] of crowds) {
-    for (let i = 0; i < n; i++) {
-      const mesh = pedMesh(rng);
-      const x = cx + rr(rng, -10, 10), z = cz + rr(rng, -10, 10);
-      mesh.position.set(x, 0, z);
-      G.fx.scene.add(mesh);
-      G.peds.push({ mesh, x, z, heading: rng() * Math.PI * 2, speed: rr(rng, 0.6, 1.4),
-        state: rng() < 0.4 ? 'idle' : 'walk', pauseT: rr(rng, 0, 4), jog: false, flee: false,
-        axis: 'x', line: nearestRoadLine(z), off: 9, cx, cz });
-    }
-  }
-  // --- stunt jump ramps ---
-  G.ramps = [];
-  for (const [rx, rz, rh] of [[-120, 240, 0], [120, -240, Math.PI / 2], [240, 120, Math.PI]]) {
-    const ramp = new THREE.Mesh(new THREE.BoxGeometry(6, 1.2, 4),
-      new THREE.MeshLambertMaterial({ color: 0xe8a23a }));
-    ramp.position.set(rx, 0.6, rz); ramp.rotation.y = rh;
-    ramp.rotation.x = 0.25;
-    G.fx.scene.add(ramp);
-    G.ramps.push({ x: rx, z: rz, used: false });
-  }
-  // --- wandering street bonus ---
-  G.bonus = { x: 0, z: 0, mesh: null, timer: 0 };
-  const bMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.3, 12),
-    new THREE.MeshLambertMaterial({ color: 0x2aff7a, emissive: 0x1a8a3a, emissiveIntensity: 0.7 }));
-  G.fx.scene.add(bMesh); G.bonus.mesh = bMesh;
-  placeBonus(G);
-  // --- taxi job state ---
-  G.taxi = { state: 'idle', passenger: null, dest: null, fare: 40, waitT: 0 };
-  spawnTaxiPassenger(G);
+  // City bus looping the east ring road.
+  const bus = makeCar('bus', CFG.ringE, -200, 0, 0x2a9a6a);
+  bus.driver = 'traffic'; bus.speed = 9; bus.horiz = false; bus.busRoute = true;
+  G.traffic.push(bus);
+  // Taco truck parked by the beach.
+  const taco = makeCar('van', -252, 160, Math.PI / 2, 0xffd23e);
+  taco.driver = 'parked'; taco.name = 'Taco Truck';
+  G.cars.push(taco);
+  initPeds(rng);
 }
-function placeBonus(G) {
-  const rng = G.rng;
-  const g = pick(rng, CFG.grid);
-  G.bonus.x = rng() < 0.5 ? g : rr(rng, -280, 280);
-  G.bonus.z = rng() < 0.5 ? rr(rng, -280, 280) : g;
-  G.bonus.mesh.position.set(G.bonus.x, 0.8, G.bonus.z);
-  G.bonus.timer = 40;
-}
-function spawnTaxiPassenger(G) {
-  const rng = G.rng;
-  const mesh = pedMesh(rng);
-  const g = pick(rng, CFG.grid);
-  const x = rng() < 0.5 ? rr(rng, -280, 280) : g + 9;
-  const z = rng() < 0.5 ? g + 9 : rr(rng, -280, 280);
-  mesh.position.set(x, 0, z);
-  G.fx.scene.add(mesh);
-  const destG = pick(rng, CFG.grid);
-  G.taxi.passenger = { mesh, x, z, dest: { x: rr(rng, -280, 280), z: destG } };
-  G.taxi.state = 'waiting';
-}
-export function updateTraffic(G, dt) {
-  const rng = G.rng;
-  // traffic cars: follow their road line, turn at intersections sometimes
-  for (const t of G.traffic) {
-    const car = t.car;
-    if (!isCarObj(car)) continue;
-    // car ahead on the same line? slow down
-    let slow = false;
-    for (const o of G.traffic) {
-      if (o === t || !isCarObj(o.car)) continue;
-      if (o.axis !== t.axis || o.line !== t.line) continue;
-      const along = t.axis === 'x' ? car.x : car.z;
-      const oAlong = t.axis === 'x' ? o.car.x : o.car.z;
-      const gap = (oAlong - along) * t.dir;
-      if (gap > 0 && gap < 10) { slow = true; break; }
+function pedGeometry() {
+  // One merged low-poly person: body + head + legs, vertex-coloured.
+  const parts = [];
+  const box = (w, h, d, x, y, z, color) => {
+    const g = new THREE.BoxGeometry(w, h, d);
+    const m = new THREE.Matrix4().setPosition(x, y, z);
+    parts.push({ geo: g, matrix: m, color });
+  };
+  const skin = 0xd8a070, shirt = 0x3a6ad8, pants = 0x2a2a33;
+  box(0.55, 0.75, 0.32, 0, 1.05, 0, shirt);
+  box(0.34, 0.34, 0.32, 0, 1.62, 0, skin);
+  box(0.2, 0.62, 0.22, -0.14, 0.31, 0, pants);
+  box(0.2, 0.62, 0.22, 0.14, 0.31, 0, pants);
+  const pos = [], nor = [], col = [], uv = [];
+  const v = new THREE.Vector3(), n = new THREE.Vector3();
+  for (const { geo, matrix, color } of parts) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const p = g.attributes.position, nn = g.attributes.normal, u = g.attributes.uv;
+    const c = new THREE.Color(color);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(matrix); pos.push(v.x, v.y, v.z);
+      n.fromBufferAttribute(nn, i).transformDirection(matrix); nor.push(n.x, n.y, n.z);
+      col.push(c.r, c.g, c.b); uv.push(u.getX(i), u.getY(i));
     }
-    const p = G.player;
-    if (isCarObj(p.car)) {
-      const dx = car.x - p.car.x, dz = car.z - p.car.z;
-      if (dx * dx + dz * dz < 64) slow = true;
-    }
-    const target = slow ? 0 : t.cruise;
-    car.speed += clamp(target - car.speed, -20 * dt, 12 * dt);
-    const step = car.speed * t.dir * dt;
-    if (t.axis === 'x') car.x += step; else car.z += step;
-    const along = t.axis === 'x' ? car.x : car.z;
-    // turn at an intersection or at the edge
-    if (Math.abs(along) > 300 || (Math.abs(along % 120) < 1.5 && rng() < 0.02)) {
-      if (Math.abs(along) > 300) { t.dir *= -1; }
-      else if (rng() < 0.4) {
-        const newLine = pick(rng, CFG.grid);
-        if (t.axis === 'x') { t.axis = 'z'; t.line = newLine; t.dir = rng() < 0.5 ? 1 : -1; car.z = newLine; }
-        else { t.axis = 'x'; t.line = newLine; t.dir = rng() < 0.5 ? 1 : -1; car.x = newLine; }
-      }
-    }
-    car.heading = t.axis === 'x' ? (t.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (t.dir > 0 ? 0 : Math.PI);
-    car.mesh.position.set(car.x, 0, car.z);
-    car.mesh.rotation.y = car.heading;
   }
-  // pedestrians
-  const px = G.player.x, pz = G.player.z;
-  const pCar = G.player.car;
-  for (const ped of G.peds) {
-    if (ped.state === 'idle') {
-      ped.pauseT -= dt;
-      if (ped.pauseT <= 0) { ped.state = 'walk'; ped.pauseT = 0; }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return out;
+}
+export function initPeds(rng) {
+  const total = CFG.pedN + CFG.crowdN;
+  const geo = pedGeometry();
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mesh = new THREE.InstancedMesh(geo, mat, total);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.castShadow = true;
+  G.scene.add(mesh);
+  G.pedMesh = mesh;
+  const shirtCols = [0x3a6ad8, 0xc03028, 0x3f8a4a, 0xffd23e, 0x7a4a8a, 0xf2f2f2, 0xff8f3d, 0x2a9a9a];
+  const crowdSpots = [[0, 0], [-180, 120], [-252, 190]];
+  for (let i = 0; i < total; i++) {
+    let x, z;
+    if (i < CFG.pedN) {
+      const p = randRoadPoint(rng);
+      x = p.x + rng.range(-8, 8); z = p.z + rng.range(-8, 8);
     } else {
-      // flee: player car fast & close, or gunfire nearby
-      const dCar = pCar && isCarObj(pCar) ? dist2(ped.x, ped.z, pCar.x, pCar.z) : 1e9;
-      const dFoot = dist2(ped.x, ped.z, px, pz);
-      ped.flee = (dCar < 100 && Math.abs(pCar.speed) > 8) || (G.gunfireT > 0 && dFoot < 400);
-      let sp = ped.jog ? 3.2 : ped.speed;
-      let hx = Math.sin(ped.heading), hz = Math.cos(ped.heading);
-      if (ped.flee) {
-        sp = 5;
-        const dx = ped.x - px, dz = ped.z - pz;
-        const d = Math.sqrt(dx * dx + dz * dz) || 1;
-        hx = dx / d; hz = dz / d;
-        ped.heading = Math.atan2(hx, hz);
-      } else if (ped.cx !== undefined) {
-        // crowd: wander near home
-        if (dist2(ped.x, ped.z, ped.cx, ped.cz) > 144) {
-          ped.heading = Math.atan2(ped.cx - ped.x, ped.cz - ped.z);
-        } else if (rng() < 0.01) ped.heading = rng() * Math.PI * 2;
-        hx = Math.sin(ped.heading); hz = Math.cos(ped.heading);
+      const c = crowdSpots[(i - CFG.pedN) % crowdSpots.length];
+      x = c[0] + rng.range(-24, 24); z = c[1] + rng.range(-24, 24);
+    }
+    if (collides(x, z, 1)) { x = nearRoad(x); z = nearRoad(z); }
+    const ped = { x, z, heading: rng.range(0, Math.PI * 2), speed: rng.range(0.8, 1.8),
+      state: 'walk', tx: x, tz: z, color: shirtCols[i % shirtCols.length], fleeT: 0 };
+    G.peds.push(ped);
+    mesh.setColorAt(i, new THREE.Color(ped.color));
+  }
+  mesh.instanceColor.needsUpdate = true;
+}
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
+export function updatePeds(dt) {
+  const p = G.player;
+  const car = p && isCarObj(p.car) ? p.car : null; // null-car guard
+  const px = p ? p.x : 0, pz = p ? p.z : 0;
+  G.peds.forEach((ped, i) => {
+    // Flee from gunfire, or from a car bearing down on them.
+    let flee = ped.fleeT > 0;
+    if (car && dist2(ped.x, ped.z, car.x, car.z) < 6 && Math.abs(car.speed) > 3) flee = true;
+    if (G.gunshotT > 0 && dist2(ped.x, ped.z, px, pz) < 25) flee = true;
+    if (flee) {
+      ped.fleeT = 1.2;
+      const a = Math.atan2(ped.x - px, ped.z - pz);
+      ped.heading = a; ped.speed = 5.5;
+    } else {
+      ped.fleeT = Math.max(0, ped.fleeT - dt);
+      ped.speed = 1.4;
+      if (dist2(ped.x, ped.z, ped.tx, ped.tz) < 2) {
+        const nr = nearRoad(ped.x);
+        ped.tx = clamp(ped.x + (Math.random() - 0.5) * 60, -300, 300);
+        ped.tz = clamp(ped.z + (Math.random() - 0.5) * 60, -300, 300);
+      }
+      ped.heading = Math.atan2(ped.tx - ped.x, ped.tz - ped.z);
+    }
+    const nx = ped.x + Math.sin(ped.heading) * ped.speed * dt;
+    const nz = ped.z + Math.cos(ped.heading) * ped.speed * dt;
+    if (!collides(nx, nz, 0.5)) { ped.x = nx; ped.z = nz; }
+    else ped.heading += 1.2;
+    _q.setFromEuler(_e.set(0, ped.heading, 0));
+    _m4.compose(_v.set(ped.x, Math.abs(Math.sin(G.elapsed * 6 + i)) * 0.04, ped.z), _q, _s);
+    G.pedMesh.setMatrixAt(i, _m4);
+  });
+  G.pedMesh.instanceMatrix.needsUpdate = true;
+}
+export function updateTraffic(dt, audio) {
+  const p = G.player;
+  for (const car of G.traffic) {
+    if (!isCarObj(car)) continue;
+    const fwdX = Math.sin(car.heading), fwdZ = Math.cos(car.heading);
+    // Pick a target point further along the current road.
+    if (!car.target || dist2(car.x, car.z, car.target.x, car.target.z) < 6) {
+      if (car.busRoute) {
+        car.target = { x: CFG.ringE, z: car.z > 0 ? -300 : 300 };
+        car.heading = car.z > 0 ? Math.PI : 0;
+      } else if (car.horiz) {
+        const dir = fwdX >= 0 ? 1 : -1;
+        let nx = car.x + dir * 120;
+        if (nx > 300 || nx < -300) { car.horiz = false; nx = car.x; }
+        car.target = { x: nx, z: nearRoad(car.z) + (dir > 0 ? 2.5 : -2.5) };
       } else {
-        // walk along the sidewalk; occasionally turn at intersections
-        if (rng() < 0.004) ped.heading += (rng() < 0.5 ? 1 : -1) * Math.PI / 2;
-        hx = Math.sin(ped.heading); hz = Math.cos(ped.heading);
-      }
-      const nx = ped.x + hx * sp * dt, nz = ped.z + hz * sp * dt;
-      const hit = collide(G, nx, nz, 0.5);
-      ped.x = hit.x; ped.z = hit.z;
-      ped.mesh.position.set(ped.x, 0, ped.z);
-      ped.mesh.rotation.y = ped.heading;
-      // walk bob
-      ped.mesh.position.y = Math.abs(Math.sin(G.t * 8 + ped.x)) * 0.06;
-      if (rng() < 0.002) { ped.state = 'idle'; ped.pauseT = rr(rng, 2, 5); }
-    }
-  }
-  // taxi passenger pickup / delivery
-  const taxi = G.taxi;
-  if (taxi.state === 'waiting' && taxi.passenger) {
-    const pp = taxi.passenger;
-    const d = dist2(px, pz, pp.x, pp.z);
-    if (d < 9 && isCarObj(pCar)) {
-      taxi.state = 'deliver';
-      G.fx.scene.remove(pp.mesh);
-      G.hudMsg = 'Passenger aboard — drive to the marker';
-    }
-  } else if (taxi.state === 'deliver') {
-    const d = dist2(px, pz, taxi.passenger.dest.x, taxi.passenger.dest.z);
-    if (d < 49 && isCarObj(pCar)) {
-      G.cash += taxi.fare;
-      G.stats.taxi = (G.stats.taxi || 0) + 1;
-      G.hudMsg = `Taxi fare +$${taxi.fare}`;
-      taxi.state = 'idle';
-      spawnTaxiPassenger(G);
-    }
-  }
-  // street bonus pickup
-  if (G.bonus && dist2(px, pz, G.bonus.x, G.bonus.z) < 4) {
-    G.cash += 25; G.hudMsg = 'Street bonus +$25';
-    if (G.audio) sfxCoin(G.audio);
-    placeBonus(G);
-  } else if (G.bonus) {
-    G.bonus.timer -= dt;
-    if (G.bonus.timer <= 0) placeBonus(G);
-    G.bonus.mesh.rotation.y += dt * 2;
-  }
-  // stunt jumps: fast over a ramp
-  if (isCarObj(pCar)) {
-    for (const r of G.ramps) {
-      if (!r.used && dist2(pCar.x, pCar.z, r.x, r.z) < 9 && Math.abs(pCar.speed) > 25) {
-        r.used = true;
-        G.cash += 50; G.hudMsg = 'Stunt jump +$50';
-        if (G.audio) sfxCoin(G.audio);
+        const dir = fwdZ >= 0 ? 1 : -1;
+        let nz = car.z + dir * 120;
+        if (nz > 300 || nz < -300) { car.horiz = true; nz = car.z; }
+        car.target = { x: nearRoad(car.x) + (dir > 0 ? -2.5 : 2.5), z: nz };
       }
     }
+    const want = Math.atan2(car.target.x - car.x, car.target.z - car.z);
+    let dh = want - car.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    car.heading += clamp(dh, -1.4 * dt, 1.4 * dt);
+    // Stop at red lights near an intersection.
+    let desired = car.busRoute ? 9 : 10;
+    const ix = nearRoad(car.x), iz = nearRoad(car.z);
+    if (Math.abs(car.x - ix) < 16 && Math.abs(car.z - iz) < 16 && lightStateAt(ix, iz) === 'red') desired = 0;
+    // Slow for the car ahead.
+    for (const o of G.traffic) {
+      if (o === car || !isCarObj(o)) continue;
+      const d = dist2(car.x, car.z, o.x, o.z);
+      if (d < 9) {
+        const ahead = (o.x - car.x) * fwdX + (o.z - car.z) * fwdZ;
+        if (ahead > 0) desired = Math.min(desired, 3);
+      }
+    }
+    if (p && isCarObj(p.car) && dist2(car.x, car.z, p.car.x, p.car.z) < 8) {
+      const ahead = (p.car.x - car.x) * fwdX + (p.car.z - car.z) * fwdZ;
+      if (ahead > 0) { desired = 0; if (audio && Math.random() < 0.002) audio.horn(); }
+    }
+    car.speed += clamp(desired - car.speed, -14 * dt, 8 * dt);
+    const nx = car.x + Math.sin(car.heading) * car.speed * dt;
+    const nz = car.z + Math.cos(car.heading) * car.speed * dt;
+    if (!collides(nx, nz, 1.2)) { car.x = nx; car.z = nz; }
+    else { car.heading += 0.6 * dt * 10; car.speed *= 0.5; }
+    syncCarMesh(car);
   }
-  // honk if the player blocks traffic
-  if (G.audio && rng() < 0.002 && isCarObj(pCar)) {
-    for (const t of G.traffic) {
-      if (dist2(t.car.x, t.car.z, pCar.x, pCar.z) < 100) { sfxHorn(G.audio); break; }
+  // Despawn far traffic, respawn near the player so streets stay busy.
+  if (p) {
+    for (const car of G.traffic) {
+      if (car.busRoute) continue;
+      if (dist2(car.x, car.z, p.x, p.z) > 220) {
+        const pt = randRoadPoint(new RNG((Math.random() * 1e9) | 0));
+        car.x = clamp(p.x + (pt.x - p.x) * 0.3, -300, 300);
+        car.z = clamp(p.z + (pt.z - p.z) * 0.3, -300, 300);
+        car.target = null;
+      }
     }
   }
 }

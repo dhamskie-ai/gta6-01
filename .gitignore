@@ -1,7 +1,5 @@
-# build + local output
-out/
 node_modules/
-# editor / OS junk
-.DS_Store
+out/
 *.tmp
 screenshots/*.tmp
+.DS_Store

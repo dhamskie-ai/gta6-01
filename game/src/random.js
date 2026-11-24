@@ -1,5 +1,5 @@
-// Seeded RNG (mulberry32) — one seed reproduces the whole city, so
-// screenshots and playtests are deterministic for a given ?seed=.
+// Seeded RNG (mulberry32) — every spawn in the city uses the same seed,
+// so the world is identical on every load with the same ?seed=.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
@@ -9,19 +9,11 @@ export function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-export function makeRng(seed) { return mulberry32(seed); }
-export function rr(rng, a, b) { return a + rng() * (b - a); }
-export function ri(rng, a, b) { return Math.floor(rr(rng, a, b + 1)); }
-export function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
-export function chance(rng, p) { return rng() < p; }
-export function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-export function lerp(a, b, t) { return a + (b - a) * t; }
-export function dist2(ax, az, bx, bz) {
-  const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz;
-}
-export function angDiff(a, b) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return d;
+export class RNG {
+  constructor(seed) { this.next = mulberry32(seed); }
+  range(a, b) { return a + this.next() * (b - a); }
+  int(a, b) { return Math.floor(this.range(a, b + 1)); }
+  pick(arr) { return arr[Math.floor(this.next() * arr.length)]; }
+  chance(p) { return this.next() < p; }
+  sign() { return this.next() < 0.5 ? -1 : 1; }
 }

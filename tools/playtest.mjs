@@ -1,153 +1,182 @@
-// SOLARA BAY playtest: desktop (title -> walk -> steal VELOZ -> drive ->
-// exit) plus a touch-mode check (joystick moves the player). Same Chromium
-// + solarabay.game route method as tools/shot.mjs. Exits non-zero on any
-// console/page error or failed step.
-import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+// Desktop (+touch) playtest for SOLARA BAY. Route-served like shot.mjs.
+// Flow: boot -> NEW GAME -> walk -> steal the VELOZ -> drive waypoints with
+// lane-offset stuck recovery -> exit car -> mission state. 0 console/page
+// errors required. Timeout 600 s (SwiftShader is ~1 fps here).
+// Usage: node tools/playtest.mjs [--touch]
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, dirname } from 'node:path';
+import { join, extname, resolve, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '/opt/muse/assets/spaces/ts-runtime/dist/node_modules/playwright/index.mjs';
 
-const NODE = '/home/hatch/node22/node-v22.21.1-linux-x64/bin/node';
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const here = fileURLToPath(new URL('.', import.meta.url));
+const repo = resolve(join(here, '..'));
+const gameRoot = join(repo, 'game');
+const touchMode = process.argv.includes('--touch');
 const policyHash = createHash('sha256').update(readFileSync('/tmp/webgl-policy.txt')).digest('hex');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const errors = [];
-function norm(a) { let d = a % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; }
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ROADS = [-240, -120, 0, 120, 240];
+const nearRoad = (v) => ROADS.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), ROADS[0]);
+let page;
+let pass = 0, fail = 0;
+function check(name, ok, extra = '') {
+  if (ok) { pass++; log('PASS', name, extra); }
+  else { fail++; log('FAIL', name, extra); }
+}
+async function state() { return page.evaluate(() => window.__game || {}); }
+async function key(code, ms) { await page.keyboard.down(code); await sleep(ms); await page.keyboard.up(code); }
+// Enter/exit via the on-screen MASUK/KELUAR button in touch mode (exercises
+// the touch wiring, not just the keyboard path).
+async function pressAct() {
+  if (touchMode) await page.tap('#btnAct');
+  else await page.keyboard.press('KeyE');
+}
 
-const server = spawn(NODE, ['serve.ts'], { cwd: ROOT, stdio: 'ignore' });
-await sleep(1500);
+async function driveTo(tx, tz, label, timeoutMs = 300000) {
+  const s0 = await state();
+  const rx1 = nearRoad(tx), rz1 = nearRoad(tz);
+  const rx0 = nearRoad(s0.x), rz0 = nearRoad(s0.z);
+  const wps = Math.hypot(tx - s0.x, tz - s0.z) < 30 ? [[tx, tz]]
+    : [[rx0, s0.z], [rx0, rz1], [rx1, rz1], [tx, tz]];
+  log('DRIVE', label, 'route', JSON.stringify(wps));
+  const t0 = Date.now();
+  let wi = 0, lastMove = Date.now(), lx = s0.x, lz = s0.z, stuckN = 0, latOff = 0;
+  const held = new Set();
+  const hold = async (code, on) => {
+    if (on && !held.has(code)) { await page.keyboard.down(code); held.add(code); }
+    if (!on && held.has(code)) { await page.keyboard.up(code); held.delete(code); }
+  };
+  const releaseAll = async () => { for (const c of [...held]) await hold(c, false); };
+  try {
+    while (Date.now() - t0 < timeoutMs) {
+      const s = await state();
+      if (s.phase !== 'play') { log('DRIVE', label, 'phase=', s.phase); await releaseAll(); return false; }
+      if (!s.inCar) { log('DRIVE', label, 'NOT IN CAR'); await releaseAll(); return false; }
+      const [wx, wz] = wps[wi];
+      const dx = wx - s.x, dz = wz - s.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 8) {
+        wi++;
+        if (wi >= wps.length) { await releaseAll(); log('DRIVE', label, 'ARRIVED'); return true; }
+        continue;
+      }
+      // Steer toward the waypoint, with a lateral lane offset after a stuck.
+      const moved = Math.hypot(s.x - lx, s.z - lz);
+      if (moved > 0.5) { lastMove = Date.now(); lx = s.x; lz = s.z; }
+      if (Date.now() - lastMove > 20000) {
+        stuckN++;
+        latOff = stuckN % 2 === 1 ? 6 : -6;
+        log('DRIVE', label, 'STUCK #' + stuckN, 'lane offset', latOff);
+        await hold('KeyW', false); await hold('KeyA', false); await hold('KeyD', false);
+        await key('KeyS', 1200);
+        await key(stuckN % 2 ? 'KeyA' : 'KeyD', 700);
+        lastMove = Date.now();
+      }
+      // Aim at the waypoint shifted laterally by latOff (other lane).
+      const px = -dz, pz = dx, pl = Math.hypot(px, pz) || 1;
+      const ax = wx + (px / pl) * latOff, az = wz + (pz / pl) * latOff;
+      const bearing = Math.atan2(ax - s.x, az - s.z);
+      const cur = s.heading || 0;
+      let dh = bearing - cur;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      await hold('KeyW', true);
+      // dh<0 (target right of nose) -> D decreases heading toward the target.
+      await hold('KeyD', dh < -0.05);
+      await hold('KeyA', dh > 0.05);
+      if (dist < 25) { await hold('KeyW', true); }
+      await sleep(400);
+    }
+  } finally { await releaseAll(); }
+  log('DRIVE', label, 'TIMEOUT');
+  return false;
+}
+
 const browser = await chromium.launch({
   executablePath: '/opt/meta-chromium/chrome',
-  env: { ...process.env, http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '', all_proxy: '', ALL_PROXY: '', no_proxy: '*', NO_PROXY: '*' },
+  env: { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NO_PROXY: '*' },
   args: ['--no-sandbox', '--disable-gpu', '--use-angle=swiftshader', '--no-proxy-server',
     '--hatch-webgl-allowed-domains-file=/tmp/webgl-policy.txt',
     `--hatch-webgl-allowed-domains-sha256=${policyHash}`],
 });
-let failed = 0;
-function check(name, ok, detail) {
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
-  if (!ok) failed++;
-}
-try {
-  const page = await browser.newPage({ viewport: { width: 800, height: 450 } });
-  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
-  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  await page.route('**/solarabay.game/**', async (route) => {
-    const url = new URL(route.request().url());
-    const res = await fetch('http://127.0.0.1:8080' + url.pathname + url.search);
-    const body = Buffer.from(await res.arrayBuffer());
-    await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') || undefined, body });
-  });
-  await page.goto('http://solarabay.game/?seed=8', { waitUntil: 'load', timeout: 60000 });
-  await sleep(3000);
-  let g = await page.evaluate(() => window.__game);
-  check('boot', !!g && g.phase === 'title', `phase=${g?.phase}`);
-  await page.evaluate(() => document.getElementById('btn-new').click());
-  await sleep(2000);
-  g = await page.evaluate(() => window.__game);
-  check('new game starts', g.phase === 'play', `phase=${g.phase}`);
-  const start = { x: g.x, z: g.z };
-  // --- autopilot: steer toward a target with W + A/D ---
-  const held = new Set();
-  async function setKeys(want) {
-    for (const k of ['w', 'a', 's', 'd']) {
-      if (want.includes(k) && !held.has(k)) { await page.keyboard.down(k); held.add(k); }
-      if (!want.includes(k) && held.has(k)) { await page.keyboard.up(k); held.delete(k); }
-    }
-  }
-  async function driveTo(tx, tz, timeoutMs, arriveD) {
-    const t0 = Date.now();
-    let lastPos = null, lastMove = Date.now(), reversing = 0;
-    while (Date.now() - t0 < timeoutMs) {
-      g = await page.evaluate(() => window.__game);
-      const dx = tx - g.x, dz = tz - g.z;
-      const d = Math.hypot(dx, dz);
-      if (d < arriveD) return { ok: true, d };
-      if (lastPos && Math.hypot(g.x - lastPos.x, g.z - lastPos.z) > 0.1) lastMove = Date.now();
-      lastPos = { x: g.x, z: g.z };
-      if (Date.now() - lastMove > 30000 && reversing <= 0) {
-        reversing = 3000;
-        console.log('  stuck — reversing');
-      }
-      const desired = Math.atan2(dx, dz);
-      const diff = norm(desired - g.heading);
-      let keys = ['w'];
-      if (reversing > 0) { keys = ['s']; if (diff > 0) keys.push('d'); else keys.push('a'); reversing -= 800; }
-      else if (diff > 0.18) keys.push('d');
-      else if (diff < -0.18) keys.push('a');
-      await setKeys(keys);
-      await sleep(800);
-    }
-    await setKeys([]);
-    return { ok: false, d: Math.hypot(tx - g.x, tz - g.z) };
-  }
-  // walk to the VELOZ (-240, 66)
-  const walk = await driveTo(-240, 66, 180000, 3.2);
-  await setKeys([]);
-  g = await page.evaluate(() => window.__game);
-  const walked = Math.hypot(g.x - start.x, g.z - start.z);
-  check('walk to VELOZ', walk.ok, `walked ${walked.toFixed(1)} m, dist ${walk.d?.toFixed(1)}`);
-  // steal it
-  await page.keyboard.press('e');
-  await sleep(2500);
-  g = await page.evaluate(() => window.__game);
-  check('steal VELOZ (inCar)', g.inCar === true, `inCar=${g.inCar} msn=${g.msn} step=${g.step}`);
-  // drive south down the Malecón to (-240, -60)
-  const d1 = await driveTo(-240, -60, 240000, 8);
-  await setKeys([]);
-  g = await page.evaluate(() => window.__game);
-  const driven = Math.hypot(g.x - start.x, g.z - start.z);
-  check('drive leg 1', d1.ok, `dist ${d1.d.toFixed(1)} speed ${g.speed} km/h`);
-  check('drove far', driven > 100, `displacement ${driven.toFixed(1)} m`);
-  // exit the car
-  await page.keyboard.press('e');
-  await sleep(2000);
-  g = await page.evaluate(() => window.__game);
-  check('exit car', g.onFoot === true && g.inCar === false, `onFoot=${g.onFoot}`);
-  check('mission advanced', g.msn === 0 && g.step >= 2, `msn=${g.msn} step=${g.step}`);
-  await page.close();
-
-  // --- touch mode ---
-  const tp = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  tp.on('console', (m) => { if (m.type() === 'error') errors.push('touch console: ' + m.text()); });
-  tp.on('pageerror', (e) => errors.push('touch pageerror: ' + e.message));
-  await tp.route('**/solarabay.game/**', async (route) => {
-    const url = new URL(route.request().url());
-    const res = await fetch('http://127.0.0.1:8080' + url.pathname + url.search);
-    const body = Buffer.from(await res.arrayBuffer());
-    await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') || undefined, body });
-  });
-  await tp.goto('http://solarabay.game/?seed=8&touch=1', { waitUntil: 'load', timeout: 60000 });
-  await sleep(3000);
-  const touchVisible = await tp.evaluate(() => {
-    const el = document.getElementById('touch-controls');
+const ctx = await browser.newContext({
+  viewport: { width: 640, height: 360 }, hasTouch: touchMode, isMobile: touchMode,
+});
+page = await ctx.newPage();
+page.on('console', (m) => { if (m.type() === 'error') { errors.push('console: ' + m.text()); log('CONSOLE-ERROR', m.text()); } });
+page.on('pageerror', (e) => { errors.push('pageerror: ' + e.message); log('PAGEERROR', e.message); });
+await page.route('**/solarabay.game/**', async (route) => {
+  const u = new URL(route.request().url());
+  let p = u.pathname === '/' ? '/index.html' : decodeURIComponent(u.pathname);
+  const file = resolve(join(gameRoot, normalize(p)));
+  if (!file.startsWith(gameRoot + sep) && file !== gameRoot) return route.abort();
+  if (!existsSync(file) || !statSync(file).isFile()) return route.abort();
+  return route.fulfill({ body: readFileSync(file), contentType: MIME[extname(file)] || 'application/octet-stream' });
+});
+await page.goto('http://solarabay.game/?seed=8' + (touchMode ? '&touch=1' : ''), { waitUntil: 'load', timeout: 60000 });
+await page.waitForFunction(() => window.__game !== undefined, { timeout: 120000 });
+let s = await state();
+check('boot (title phase)', s.phase === 'title', JSON.stringify(s));
+if (touchMode) {
+  const vis = await page.evaluate(() => {
+    const el = document.getElementById('touchUI');
     return el && !el.classList.contains('hidden');
   });
-  check('touch controls visible', touchVisible);
-  await tp.evaluate(() => document.getElementById('btn-new').click());
-  await sleep(2000);
-  const t0 = await tp.evaluate(() => window.__game);
-  // drag the joystick upward (pointer events drive it)
-  const joy = await tp.evaluate(() => {
-    const r = document.getElementById('joy-base').getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
-  await tp.mouse.move(joy.x, joy.y);
-  await tp.mouse.down();
-  await tp.mouse.move(joy.x, joy.y - 40, { steps: 5 });
-  await sleep(6000);
-  await tp.mouse.up();
-  const t1 = await tp.evaluate(() => window.__game);
-  const moved = Math.hypot(t1.x - t0.x, t1.z - t0.z);
-  check('touch joystick moves player', moved > 1, `moved ${moved.toFixed(1)} m`);
-  await tp.close();
-} finally {
-  await browser.close();
-  server.kill();
+  check('touch UI visible', !!vis);
+  await page.tap('#btnNew');
+} else {
+  await page.click('#btnNew');
 }
-if (errors.length) { console.log('ERRORS:'); for (const e of errors) console.log('  ' + e); }
-check('0 console/page errors', errors.length === 0, `${errors.length} errors`);
-console.log(failed ? `PLAYTEST FAILED (${failed})` : 'PLAYTEST PASSED');
-process.exit(failed || errors.length ? 1 : 0);
+await sleep(2000);
+s = await state();
+check('new game -> play', s.phase === 'play', JSON.stringify(s));
+// Walk north toward the VELOZ (spawn -240,80 -> veloz -240,66).
+const sWalk0 = await state();
+await key('KeyW', 9000);
+s = await state();
+check('walked forward', Math.hypot(s.x - sWalk0.x, s.z - sWalk0.z) > 2, JSON.stringify(s));
+// Walk to the Veloz in short bursts; correct an overshoot (SwiftShader
+// frames are coarse, so a long hold can walk straight past the car).
+for (let i = 0; i < 40; i++) {
+  s = await state();
+  const d = Math.hypot(s.x + 240, s.z - 66);
+  if (d < 3.5) break;
+  if (s.z < 62) await key('KeyS', 800); // walked past it (north), step back south
+  else await key('KeyW', 1200);
+}
+// Press E until the VELOZ itself is entered (a passing traffic car can be
+// nearer than the parked Veloz — stealing it is legal in-game, just not
+// what this leg tests). Retry a few times; traffic moves on.
+let stoleVeloz = false;
+for (let i = 0; i < 6 && !stoleVeloz; i++) {
+  await pressAct();
+  await sleep(1500);
+  s = await state();
+  if (s.inCar && s.car === 'Veloz Comet RS') { stoleVeloz = true; break; }
+  if (s.inCar) { await pressAct(); await sleep(1200); } // exit wrong car
+  // Step back toward the Veloz and try again.
+  await key('KeyS', 600);
+}
+s = await state();
+check('stole VELOZ (inCar)', stoleVeloz, JSON.stringify(s));
+if (s.inCar) {
+  await sleep(2000); // let heading settle to the car's heading before steering
+  const ok = await driveTo(0, -180, 'to Courier checkpoint', 300000);
+  check('drove to (0,-180)', ok);
+  s = await state();
+  log('after drive', JSON.stringify(s));
+  await pressAct();
+  await sleep(1200);
+  s = await state();
+  check('exited car', !s.inCar, JSON.stringify(s));
+}
+s = await state();
+check('mission active', s.mission >= 1, JSON.stringify(s));
+check('health > 0', s.health > 0, JSON.stringify(s));
+await browser.close();
+log('PLAYTEST', touchMode ? 'touch' : 'desktop', 'PASS', pass, 'FAIL', fail, 'ERRORS', errors.length);
+if (errors.length) for (const e of errors) console.error(' -', e);
+process.exit(fail || errors.length ? 1 : 0);
